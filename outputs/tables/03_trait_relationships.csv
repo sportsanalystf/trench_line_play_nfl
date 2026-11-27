@@ -1,25 +1,25 @@
 group,trait,vs,n,spearman
-OL,first_step,same-trait stopwatch index,96,0.27
-OL,first_step,body weight,121,-0.05
-OL,first_step,tracking lateral,121,0.0
-OL,first_step,tracking burst,121,0.61
-OL,lateral,same-trait stopwatch index,73,0.32
-OL,lateral,body weight,121,-0.2
-OL,lateral,tracking first_step,121,0.0
-OL,lateral,tracking burst,121,-0.05
-OL,burst,same-trait stopwatch index,109,0.29
-OL,burst,body weight,121,-0.07
-OL,burst,tracking first_step,121,0.61
-OL,burst,tracking lateral,121,-0.05
-DL,first_step,same-trait stopwatch index,94,0.23
-DL,first_step,body weight,118,-0.15
-DL,first_step,tracking lateral,114,0.2
-DL,first_step,tracking burst,118,0.64
-DL,lateral,same-trait stopwatch index,50,0.41
-DL,lateral,body weight,114,-0.38
-DL,lateral,tracking first_step,114,0.2
-DL,lateral,tracking burst,114,0.46
-DL,burst,same-trait stopwatch index,109,0.37
 DL,burst,body weight,118,-0.45
+DL,burst,same-trait stopwatch index,109,0.37
 DL,burst,tracking first_step,118,0.64
 DL,burst,tracking lateral,114,0.46
+DL,first_step,body weight,118,-0.15
+DL,first_step,same-trait stopwatch index,94,0.23
+DL,first_step,tracking burst,118,0.64
+DL,first_step,tracking lateral,114,0.2
+DL,lateral,body weight,114,-0.38
+DL,lateral,same-trait stopwatch index,50,0.41
+DL,lateral,tracking burst,114,0.46
+DL,lateral,tracking first_step,114,0.2
+OL,burst,body weight,121,-0.07
+OL,burst,same-trait stopwatch index,109,0.29
+OL,burst,tracking first_step,121,0.61
+OL,burst,tracking lateral,121,-0.05
+OL,first_step,body weight,121,-0.05
+OL,first_step,same-trait stopwatch index,96,0.27
+OL,first_step,tracking burst,121,0.61
+OL,first_step,tracking lateral,121,0.0
+OL,lateral,body weight,121,-0.2
+OL,lateral,same-trait stopwatch index,73,0.32
+OL,lateral,tracking burst,121,-0.05
+OL,lateral,tracking first_step,121,0.0

@@ -1,16 +1,16 @@
 issue,where,finding,treatment
-missing value,OL · three_cone,49.6% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,OL · short_shuttle,47.1% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,OL · ten_yd_split,20.7% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,OL · forty,21.5% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,OL · broad_jump,19.0% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,OL · vertical,17.4% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,DL · three_cone,63.6% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,DL · short_shuttle,61.0% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,DL · ten_yd_split,20.3% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,DL · forty,20.3% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · three_cone,49.59% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · short_shuttle,47.11% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · ten_yd_split,20.66% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · forty,21.49% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · broad_jump,19.01% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · vertical,17.36% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · three_cone,63.56% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · short_shuttle,61.02% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · ten_yd_split,20.34% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · forty,20.34% of prospects,trait index from other components; stopwatch index + missing flag
 missing value,DL · broad_jump,17.8% of prospects,trait index from other components; stopwatch index + missing flag
-missing value,DL · vertical,13.6% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · vertical,13.56% of prospects,trait index from other components; stopwatch index + missing flag
 inconsistent label,combine_tracking.drill_name,PASS_PRO-MIRROR_DRILL (2024–25) vs PASS_PRO_MIRROR_DRILL (2023),standardized in nb 01 (1 name left)
 unreliable column,combine_tracking.dis,"dis ≈ (x/y step)²: median ratio 0.96, corr 0.992","distance recomputed from x, y"
 semantics,combine_tracking.a,min = 0.00: unsigned magnitude,signed acceleration from Δspeed (nb 03)

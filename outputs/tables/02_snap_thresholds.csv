@@ -1,3 +1,3 @@
-group,snap type,players,0 snaps,50+,100+,200+
-OL,ol pass block snaps,121,32,70,67,60
-DL,dl rush snaps,118,20,82,70,50
+group,players,0 snaps,50+,100+,200+,snap type
+OL,121,32,70,67,60,pass-block snaps
+DL,118,20,82,70,50,rush snaps
