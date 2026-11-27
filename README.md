@@ -79,9 +79,10 @@ Raw data is read from `/standard/ds7200-apt4c/DS5110_Fall26_Group3/data` and the
 
 ## Results so far (full run on Rivanna)
 
-* **Burst → DL get-off is the one trait effect that holds up on the 2025 class:** +0.006 R² over the context benchmark, CI [+0.001, +0.013]. It is the only tracking-based trait to beat its stopwatch counterpart.
-* No trait improves prediction of **pressure** (DL or OL) or **run success**. Players do differ: knowing each player's true average lifts AUROC by 0.04–0.05. But Combine movement drills don't capture what differs.
-* At the **player level** (07b), the stopwatch speed and jump drills correlate strongly with a DL's average get-off (r ≈ 0.6–0.7, 55 players). In repeated cross-validation they add about 0.09 R² over alignment alone (0.41 vs 0.33); the tracking traits correlate less (|r| ≈ 0.1–0.35) and add nothing. Only about 10% of get-off variance is between players, so the same effect is worth under 0.01 R² per snap. That matches 07. The 2025 class (11 players) is too small to confirm it out of time.
+* **Burst → DL get-off is the trait effect that holds up on the 2025 class:** +0.007 R² over the context benchmark, CI [+0.003, +0.012]. It was also significant with the earlier train/validation split (+0.006, CI [+0.001, +0.013]), so it does not depend on which players happen to be in training.
+* **Lateral agility (+0.011) and all three traits together (+0.023) also beat the benchmark for get-off with the current split, but not with the earlier one.** With only ~59 DL in training, swapping 15 of them moves these effects, so treat them as suggestive. The stopwatch drills add +0.020, CI [−0.001, +0.044].
+* No trait improves prediction of **pressure** (DL or OL) or **run success**. Players do differ: knowing each player's true average lifts AUROC by about 0.04–0.05 for pressure and 0.02 for run success. But Combine movement drills don't capture what differs.
+* At the **player level** (07b), the stopwatch speed and jump drills correlate strongly with a DL's average get-off (r ≈ 0.6–0.7, 55 players). In repeated cross-validation they add about 0.06 R² over alignment alone (0.39 vs 0.33); the tracking traits correlate less (|r| ≈ 0.1–0.35) and add nothing. Only about 10% of get-off variance is between players, so the same effect is worth under 0.01 R² per snap. The 2025 class (11 players) is too small to confirm it out of time.
 * **Spark** (notebook 10, 16 cores):
   * scanning 2 GB of tracking CSV is 12.7× faster on 16 cores than on 1;
   * Parquet is 6.5× faster than CSV;
