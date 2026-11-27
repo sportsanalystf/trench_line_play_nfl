@@ -64,7 +64,7 @@ dl[["nfl_id", "rush_snaps", "mean_get_off", "edge_share"] + STOPWATCH + TRACKING
 # %%
 def corr_row(x, name):
     d = dl[[name, "mean_get_off"]].dropna()
-    n = len(d); r = d[name].corr(d.mean_get_off); rho = d[name].corr(d.mean_get_off, method="spearman")
+    n = len(d); r = d[name].corr(d.mean_get_off); rho = d[name].rank().corr(d.mean_get_off.rank())   # Spearman = Pearson on ranks (no scipy needed)
     z, se = np.arctanh(r), 1 / np.sqrt(max(n - 3, 1))
     return dict(feature=name, label=LABELS[name], kind=x, n=n, pearson_r=r, ci_lo=np.tanh(z - 1.96 * se), ci_hi=np.tanh(z + 1.96 * se),
                 spearman_rho=rho)
