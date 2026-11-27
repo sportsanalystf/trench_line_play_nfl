@@ -1,0 +1,17 @@
+column(s),role,source,description
+pressure (DL),target,player_play,"1 if the rusher has a time-to-pressure, a QB hurry, or a sack"
+player_get_off (DL),target,player_play,Seconds from snap until the rusher crosses the line
+pressure_allowed (OL),target,player_play,"True if the lineman allowed a hurry, hit or sack"
+peak_pressure_probability_allowed (OL),target,player_play,Peak NGS pressure probability he allowed (0–1)
+run_success (OL),target,derived,EPA > 0 on a run where he is at the point of attack
+"down, yards_to_go, dist_bucket, quarter, half_seconds_left, is_two_minute",context,player_play,Game situation
+"yards_from_own_goal, team_score_diff, team_win_prob, is_home",context,derived,"Field position, score and win probability from his team's side"
+"offense_formation, receiver_alignment, lined_up_position",context,player_play,Rare levels (< 1%) grouped as OTHER
+nfl_experience,context,derived,season − draft year
+"run_gap, slot, credit (OL run)",attribution,nb 04,Gap from play-by-play text; lineman slot LT…RT; credit 1 / 0.5
+"trk_first_step, trk_lateral, trk_burst",trait,nb 03,"Tracking trait indices (z-scores within group, higher = better)"
+"adj_first_step, adj_lateral, adj_burst",trait,nb 03,"Same, after removing the effect of body weight"
+"sw_first_step, sw_lateral, sw_burst (+ miss flags)",stopwatch,nb 03,10-yd split; shuttle + 3-cone; broad + vertical + 40
+"combine_weight, combine_height, arm_length",size,combine_results,Measurables
+"nfl_id, draft_year, split, fold",id/split,players / nb 05,Player-grouped splits; 2025 class = test
+"pass_result, dropback_duration, time_to_pressure_allowed, pass_rushers_encountered, sack",excluded,player_play,Post-snap: define or follow the outcome

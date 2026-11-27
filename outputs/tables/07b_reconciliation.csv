@@ -1,0 +1,8 @@
+quantity,value
+"between-player share of get-off variance (ICC, all DL rush snaps)",0.09765784826621464
+"implied snap-level gain from player-level R², stopwatch + edge share",0.008235480364238951
+"implied snap-level gain from player-level R², tracking + edge share",0.0
+"implied snap-level gain from player-level R², stopwatch + tracking + edge share",0.0020933686048013574
+measured snap-level gain in notebook 07 (burst),0.0063
+measured snap-level gain in notebook 07 (stopwatch),0.0039
+measured snap-level gain in notebook 07 (traits),0.0091

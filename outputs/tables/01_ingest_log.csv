@@ -1,0 +1,14 @@
+table,stage,rows
+players,raw,510
+combine_results,raw,510
+combine_tracking,raw,463189
+games,raw,1002
+player_career,raw,510
+player_play,raw,314197
+game_tracking,raw,22654290
+line_players,cohort + combine + career,239
+combine_tracking,OL + DL player frames,176224
+combine_tracking,frames with s > 12 yd/s (dropped),0
+combine_tracking,clean player frames,176224
+player_play,OL + DL cohort rows,175955
+game_tracking,OL + DL cohort frames,12422030

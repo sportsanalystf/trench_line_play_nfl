@@ -1,0 +1,72 @@
+{
+  "context_cat": [
+    "down_cat",
+    "dist_bucket",
+    "offense_formation",
+    "receiver_alignment",
+    "lined_up_position"
+  ],
+  "context_num": [
+    "yards_to_go",
+    "quarter",
+    "half_seconds_left",
+    "is_two_minute",
+    "yards_from_own_goal",
+    "team_score_diff",
+    "team_win_prob",
+    "is_home",
+    "nfl_experience"
+  ],
+  "run_cat": [
+    "run_gap",
+    "slot"
+  ],
+  "run_num": [
+    "credit"
+  ],
+  "trk": [
+    "trk_first_step",
+    "trk_lateral",
+    "trk_burst"
+  ],
+  "sw": [
+    "sw_first_step",
+    "sw_lateral",
+    "sw_burst",
+    "miss_sw_first_step",
+    "miss_sw_lateral",
+    "miss_sw_burst"
+  ],
+  "adj": [
+    "adj_first_step",
+    "adj_lateral",
+    "adj_burst"
+  ],
+  "size": [
+    "combine_weight",
+    "combine_height",
+    "arm_length"
+  ],
+  "tasks": {
+    "dl_pressure": {
+      "group": "DL",
+      "kind": "classification"
+    },
+    "dl_getoff": {
+      "group": "DL",
+      "kind": "regression"
+    },
+    "ol_pressure": {
+      "group": "OL",
+      "kind": "classification"
+    },
+    "ol_pressure_prob": {
+      "group": "OL",
+      "kind": "regression"
+    },
+    "ol_run": {
+      "group": "OL",
+      "kind": "classification"
+    }
+  }
+}

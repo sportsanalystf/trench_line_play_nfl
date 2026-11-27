@@ -1,0 +1,33 @@
+# --- data: never commit (CC BY-NC licence, and too large) ---
+data/*
+!data/README.md
+processed/
+*.csv.gz
+*.parquet
+spark-warehouse/
+metastore_db/
+derby.log
+
+# --- regenerated outputs that are too large for git ---
+outputs/models/
+outputs/animations/*.mp4
+outputs/animations/*.gif
+outputs/play_viewer/
+# figures/, tables/, feature_sets.json and the animation stills ARE committed
+
+# --- run logs ---
+slurm/logs/*
+!slurm/logs/README.md
+slurm-*.out
+
+# --- references we don't own (Kaggle notebooks etc.) ---
+references/
+
+# --- system / editor ---
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.zip

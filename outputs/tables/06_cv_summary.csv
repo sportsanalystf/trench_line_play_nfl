@@ -1,0 +1,46 @@
+task,kind,model,settings,best_params,cv_mean,cv_std,seconds
+dl_pressure,classification,benchmark,2,"{""regParam"": 0.01}",0.5896,0.0185,39.7
+dl_pressure,classification,first_step,2,"{""regParam"": 0.01}",0.5904,0.0178,32.8
+dl_pressure,classification,lateral,2,"{""regParam"": 0.01}",0.5878,0.0184,32.7
+dl_pressure,classification,burst,2,"{""regParam"": 0.01}",0.5881,0.0186,31.4
+dl_pressure,classification,traits,2,"{""regParam"": 0.01}",0.5825,0.0223,31.7
+dl_pressure,classification,stopwatch,2,"{""regParam"": 0.01}",0.5953,0.0192,33.5
+dl_pressure,classification,traits_size,2,"{""regParam"": 0.01}",0.589,0.016,37.6
+dl_pressure,classification,rf,4,"{""numTrees"": 100, ""maxDepth"": 6, ""minInstancesPerNode"": 500}",0.5967,0.0174,30.2
+dl_pressure,classification,gbt,4,"{""maxIter"": 40, ""maxDepth"": 2, ""minInstancesPerNode"": 2000, ""stepSize"": 0.1}",0.5926,0.0179,73.3
+dl_getoff,regression,benchmark,2,"{""regParam"": 0.01}",0.2046,0.0476,10.3
+dl_getoff,regression,first_step,2,"{""regParam"": 0.01}",0.1896,0.0524,10.9
+dl_getoff,regression,lateral,2,"{""regParam"": 0.01}",0.2037,0.0474,11.4
+dl_getoff,regression,burst,2,"{""regParam"": 0.01}",0.2066,0.0439,10.7
+dl_getoff,regression,traits,2,"{""regParam"": 0.01}",0.1971,0.0496,11.7
+dl_getoff,regression,stopwatch,2,"{""regParam"": 0.01}",0.1973,0.0662,11.9
+dl_getoff,regression,traits_size,2,"{""regParam"": 0.01}",0.1918,0.0742,12.9
+dl_getoff,regression,rf,4,"{""numTrees"": 100, ""maxDepth"": 6, ""minInstancesPerNode"": 500}",0.165,0.0372,25.0
+dl_getoff,regression,gbt,4,"{""maxIter"": 40, ""maxDepth"": 3, ""minInstancesPerNode"": 500, ""stepSize"": 0.1}",0.1731,0.0685,74.8
+ol_pressure,classification,benchmark,2,"{""regParam"": 0.01}",0.5952,0.0099,31.2
+ol_pressure,classification,first_step,2,"{""regParam"": 0.01}",0.5944,0.0087,33.5
+ol_pressure,classification,lateral,2,"{""regParam"": 0.01}",0.5947,0.0107,32.5
+ol_pressure,classification,burst,2,"{""regParam"": 0.01}",0.594,0.0084,31.0
+ol_pressure,classification,traits,2,"{""regParam"": 0.01}",0.5938,0.009,34.8
+ol_pressure,classification,stopwatch,2,"{""regParam"": 0.01}",0.5926,0.0089,34.6
+ol_pressure,classification,traits_size,2,"{""regParam"": 0.01}",0.5866,0.0122,39.0
+ol_pressure,classification,rf,4,"{""numTrees"": 100, ""maxDepth"": 6, ""minInstancesPerNode"": 500}",0.59,0.0095,32.6
+ol_pressure,classification,gbt,4,"{""maxIter"": 40, ""maxDepth"": 2, ""minInstancesPerNode"": 500, ""stepSize"": 0.1}",0.5774,0.0125,80.4
+ol_pressure_prob,regression,benchmark,2,"{""regParam"": 0.01}",0.0409,0.0071,11.2
+ol_pressure_prob,regression,first_step,2,"{""regParam"": 0.01}",0.0404,0.0062,13.9
+ol_pressure_prob,regression,lateral,2,"{""regParam"": 0.01}",0.0408,0.0074,13.1
+ol_pressure_prob,regression,burst,2,"{""regParam"": 0.01}",0.0405,0.0062,12.4
+ol_pressure_prob,regression,traits,2,"{""regParam"": 0.01}",0.0401,0.0068,14.4
+ol_pressure_prob,regression,stopwatch,2,"{""regParam"": 0.01}",0.0401,0.0072,13.8
+ol_pressure_prob,regression,traits_size,2,"{""regParam"": 0.01}",0.0385,0.0064,16.5
+ol_pressure_prob,regression,rf,4,"{""numTrees"": 100, ""maxDepth"": 6, ""minInstancesPerNode"": 500}",0.0319,0.0028,28.9
+ol_pressure_prob,regression,gbt,4,"{""maxIter"": 40, ""maxDepth"": 2, ""minInstancesPerNode"": 500, ""stepSize"": 0.1}",0.0343,0.0022,78.0
+ol_run,classification,benchmark,2,"{""regParam"": 0.01}",0.6402,0.0093,24.5
+ol_run,classification,first_step,2,"{""regParam"": 0.01}",0.6402,0.01,25.3
+ol_run,classification,lateral,2,"{""regParam"": 0.01}",0.6401,0.0088,25.4
+ol_run,classification,burst,2,"{""regParam"": 0.01}",0.6399,0.0097,25.7
+ol_run,classification,traits,2,"{""regParam"": 0.01}",0.6399,0.0095,26.7
+ol_run,classification,stopwatch,2,"{""regParam"": 0.01}",0.6363,0.0088,26.3
+ol_run,classification,traits_size,2,"{""regParam"": 0.01}",0.6364,0.0066,28.2
+ol_run,classification,rf,4,"{""numTrees"": 100, ""maxDepth"": 6, ""minInstancesPerNode"": 500}",0.6267,0.0066,27.8
+ol_run,classification,gbt,4,"{""maxIter"": 40, ""maxDepth"": 2, ""minInstancesPerNode"": 500, ""stepSize"": 0.1}",0.644,0.0097,59.3

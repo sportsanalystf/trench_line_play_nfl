@@ -1,0 +1,23 @@
+issue,where,finding,treatment
+missing value,OL · three_cone,49.6% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · short_shuttle,47.1% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · ten_yd_split,20.7% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · forty,21.5% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · broad_jump,19.0% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,OL · vertical,17.4% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · three_cone,63.6% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · short_shuttle,61.0% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · ten_yd_split,20.3% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · forty,20.3% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · broad_jump,17.8% of prospects,trait index from other components; stopwatch index + missing flag
+missing value,DL · vertical,13.6% of prospects,trait index from other components; stopwatch index + missing flag
+inconsistent label,combine_tracking.drill_name,PASS_PRO-MIRROR_DRILL (2024–25) vs PASS_PRO_MIRROR_DRILL (2023),standardized in nb 01 (1 name left)
+unreliable column,combine_tracking.dis,"dis ≈ (x/y step)²: median ratio 0.96, corr 0.992","distance recomputed from x, y"
+semantics,combine_tracking.a,min = 0.00: unsigned magnitude,signed acceleration from Δspeed (nb 03)
+row count,player_play.csv,"314,197 rows vs 316,338 on the competition page",used as delivered
+mislabel risk,game_id,"15,871 January cohort rows with year ≠ season",season from games.csv
+scope,season_type,"29,734 preseason cohort rows",excluded
+missing value,play_description run gap,"1,322 OL non-pass rows without a gap (kneels, aborted snaps, penalties)",excluded from run blocking
+missing field,lineman side,data gives T/G/C only; no left/right,inferred from position at the snap vs hash marks (nb 04)
+coverage,in-game tracking,"only the 510 rookies are tracked: no ball carrier, no blockers or rushers they face",outcomes from NGS fields + play-by-play text
+constant column,player_play.unblocked_pressure,non-null on 0 OL rows,not used

@@ -1,0 +1,7 @@
+group,population,rows
+DL,all regular-season rows,52609
+DL,"pass-rush snaps (dropback + get-off, not nullified)",25283
+OL,all regular-season rows at T/G/C,85753
+OL,pass-block snaps (pressure_allowed recorded),48536
+OL,run snaps (no pass result),33994
+OL,run snaps with a run gap in the text,32672

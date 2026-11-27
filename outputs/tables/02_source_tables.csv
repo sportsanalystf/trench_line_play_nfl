@@ -1,0 +1,8 @@
+file,grain (one row =),key,content,rows used (OL + DL cohort)
+players.csv,player,nfl_id,"Demographics, draft round / pick",239
+combine_results.csv,player,nfl_id,Measurables and stopwatch drills,239
+combine_tracking.csv,10 Hz frame of a drill attempt,event_id + time,"Combine optical tracking (x, y, speed, accel., direction)","176,224"
+player_play.csv,player × play,game_id + play_id + nfl_id,"Play context, play-by-play text, NGS pass-rush / pass-block metrics","175,955"
+games.csv,game,game_id,"Season, week, season type","1,002"
+game_tracking_2023–25.csv,10 Hz frame of an NFL play,game_id + play_id + nfl_id + time,In-game tracking of the 510 rookies (~2 GB),"12,422,030"
+player_career_successes.csv,player,nfl_id,Career snaps and starts,239

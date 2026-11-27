@@ -1,0 +1,15 @@
+choice,module,speedup
+season= partition pruning (E3),M3/M4,0.7756346949228426
+"16 cores vs 1, GBT fit (E4 W3)",M8/M9,1.1311730133373277
+cache() for 3 reuses (E6),M2,1.6392913062950663
+best vs worst shuffle partitions (E5),M1,1.7042279254881465
+CV parallelism 8 vs 1 (E10),M8,2.0868447036263778
+broadcast vs sort-merge join (E7),M2,2.293533053084492
+"Spark 16 cores vs pandas, CSV scan (E4)",M1,2.5959165065912364
+two-stage vs skewed window (E8),M5,2.7446934774274867
+explicit schema vs inferSchema (E1),M3,3.372830205297044
+"16 cores vs 1, window step (E4 W2)",M1/M2,3.4448356989446727
+"Parquet vs CSV, filter pushdown (E2)",M3,6.451471468333458
+"Parquet vs CSV, 2-column query (E2)",M3,6.611943206636877
+"16 cores vs 1, CSV scan (E4 W1)",M1/M2,12.673446633409187
+DataFrame vs RDD (E9),M2/M3,48.973909602011055

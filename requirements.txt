@@ -1,0 +1,12 @@
+# Python 3.9+ ; Java 17+ for Spark 4 (Java 8/11/17 for Spark 3.4-3.5)
+# On Rivanna: `module load spark miniforge` already provides pyspark (4.x) -- do NOT pip install pyspark there.
+# Elsewhere: pip install "pyspark>=3.4"
+pandas>=1.5
+numpy>=1.23
+matplotlib>=3.6
+pyarrow>=10             # Parquet reads in pandas (optional)
+jupyterlab>=3
+nbconvert>=7            # batch execution (run_pipeline.slurm)
+ipykernel>=6
+imageio-ffmpeg>=0.4    # MP4 export in notebook 08 (bundles its own ffmpeg)
+plotly>=5.18          # notebook 11 interactive play viewer

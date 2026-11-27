@@ -1,0 +1,15 @@
+module,concept,where in this project,measured in
+M1,"MapReduce: map → shuffle → reduce, combiners","every groupBy (partial + final HashAggregate), notebook 04 snap metrics","E5, notebook 09 stage diagram"
+M1/M2,"Driver, executors, task slots, local[*]","run_pipeline.slurm: one 16-core node, local mode",E4 strong scaling
+M2,"Lazy evaluation, DAG, stages",each notebook builds plans; actions = count / write / fit,notebook 09 physical plan
+M2,persist() / cache(),trait frames and task tables reused across CV fits,E6
+M2/M3,RDD vs DataFrame,all code uses DataFrames + Spark SQL functions,E9
+M3,"Explicit schemas, malformed records",StructType for all 9 CSVs; multiLine + escape for play text,E1
+M3,"Parquet, column pruning, predicate pushdown",CSV → Parquet once in notebook 01,E2
+M3/M4,"Partitioning, partition discovery","partitionBy(season), partitionBy(drill_type)",E3
+M5,"Data skew, hot spots, salting / two-stage","frame work keyed by (game, play, player), not player",E8
+M6,Sparse vectors,OneHotEncoder → sparse feature vectors,E10
+M8,"ML Pipelines, CrossValidator, feature utilities","9 pipelines × 5 tasks, player-grouped foldCol","E10, notebook 06"
+M9,Data-parallel training,LR / RF / GBT fits distributed over partitions,"E4 W3, E10"
+M11,"Structured Streaming, micro-batches",replay of tracking frames as a stream,E11
+M12,Governance,CC BY-NC data (non-commercial use); Combine clips anonymous; raw data never copied into outputs,—
