@@ -1,81 +1,81 @@
 repeat,feature_set,r2
-0,edge share only,0.35093158038526817
-0,stopwatch + edge share,0.45239756100007456
-0,tracking + edge share,0.2606953743122792
-0,stopwatch + tracking + edge share,0.37056999731671825
-1,edge share only,0.3214783955658501
-1,stopwatch + edge share,0.44966074175283466
-1,tracking + edge share,0.277521492360959
-1,stopwatch + tracking + edge share,0.38198529535167736
-2,edge share only,0.33301314928939796
-2,stopwatch + edge share,0.43796802111783184
-2,tracking + edge share,0.34043160596760635
-2,stopwatch + tracking + edge share,0.41229367452106314
-3,edge share only,0.33513566444916854
-3,stopwatch + edge share,0.3488454621400592
-3,tracking + edge share,0.28139838639676895
-3,stopwatch + tracking + edge share,0.24476033089072513
-4,edge share only,0.3347531332572524
-4,stopwatch + edge share,0.3998689667928874
-4,tracking + edge share,0.29326336164672795
-4,stopwatch + tracking + edge share,0.33694653139476327
-5,edge share only,0.34937365571092327
-5,stopwatch + edge share,0.43916473885854834
-5,tracking + edge share,0.27999816312391546
-5,stopwatch + tracking + edge share,0.3997968684274047
-6,edge share only,0.35466889679278624
-6,stopwatch + edge share,0.42323800055965033
-6,tracking + edge share,0.3396323709272727
-6,stopwatch + tracking + edge share,0.3958022518287253
-7,edge share only,0.3519384156673049
-7,stopwatch + edge share,0.43737202958139376
-7,tracking + edge share,0.32791655271107767
-7,stopwatch + tracking + edge share,0.36865410988762126
-8,edge share only,0.3192225065129869
-8,stopwatch + edge share,0.43162383531638726
-8,tracking + edge share,0.24134828087739446
-8,stopwatch + tracking + edge share,0.37097724746689287
-9,edge share only,0.28939246505652505
-9,stopwatch + edge share,0.3912422827915233
-9,tracking + edge share,0.18643972253799102
-9,stopwatch + tracking + edge share,0.3170741730587334
-10,edge share only,0.3387386538471695
-10,stopwatch + edge share,0.4197635964475036
-10,tracking + edge share,0.24779334732643254
-10,stopwatch + tracking + edge share,0.35516681406148987
-11,edge share only,0.31458902474442674
-11,stopwatch + edge share,0.35655740259844493
-11,tracking + edge share,0.20558717094801493
-11,stopwatch + tracking + edge share,0.27463478994555823
-12,edge share only,0.30686981902780663
-12,stopwatch + edge share,0.39222840744776544
-12,tracking + edge share,0.26264246539851266
-12,stopwatch + tracking + edge share,0.31409900755043907
-13,edge share only,0.33668203750709635
-13,stopwatch + edge share,0.38570764071290775
-13,tracking + edge share,0.2774063129472193
-13,stopwatch + tracking + edge share,0.3274990604530782
-14,edge share only,0.31691605105602216
-14,stopwatch + edge share,0.4612844751943409
-14,tracking + edge share,0.2952914213157206
-14,stopwatch + tracking + edge share,0.4252305231144995
-15,edge share only,0.3197043757452084
-15,stopwatch + edge share,0.35243326220254956
-15,tracking + edge share,0.32960072661846895
-15,stopwatch + tracking + edge share,0.3221929396455083
-16,edge share only,0.34438834921872585
-16,stopwatch + edge share,0.43109460673214817
-16,tracking + edge share,0.3176482205434369
-16,stopwatch + tracking + edge share,0.3474659331195026
-17,edge share only,0.2871483342132175
-17,stopwatch + edge share,0.40156459736957695
-17,tracking + edge share,0.18748945542201578
-17,stopwatch + tracking + edge share,0.342374309881899
-18,edge share only,0.3427245268410385
-18,stopwatch + edge share,0.44524942690227887
-18,tracking + edge share,0.30561164172177613
-18,stopwatch + tracking + edge share,0.3718835280830527
-19,edge share only,0.33592643825473245
-19,stopwatch + edge share,0.41292919292980856
-19,tracking + edge share,0.2988301752844381
-19,stopwatch + tracking + edge share,0.3329029609537577
+0,edge share only,0.3498988888400629
+0,stopwatch + edge share,0.4080645601957936
+0,tracking + edge share,0.3066029271016706
+0,stopwatch + tracking + edge share,0.3086958022328907
+1,edge share only,0.35200945394891525
+1,stopwatch + edge share,0.4453255652863942
+1,tracking + edge share,0.2755135140871071
+1,stopwatch + tracking + edge share,0.2949889498294067
+2,edge share only,0.3504657346643819
+2,stopwatch + edge share,0.46082676959606417
+2,tracking + edge share,0.27337547818184016
+2,stopwatch + tracking + edge share,0.297324848119465
+3,edge share only,0.31786224351225
+3,stopwatch + edge share,0.35245652131693506
+3,tracking + edge share,0.2585140317334472
+3,stopwatch + tracking + edge share,0.29647289603165305
+4,edge share only,0.3522645336482402
+4,stopwatch + edge share,0.3095493174978038
+4,tracking + edge share,0.2871313216505996
+4,stopwatch + tracking + edge share,0.21072463545092723
+5,edge share only,0.3512014063043426
+5,stopwatch + edge share,0.44532325979540477
+5,tracking + edge share,0.30249442176105923
+5,stopwatch + tracking + edge share,0.33669628680161934
+6,edge share only,0.35408477889909973
+6,stopwatch + edge share,0.47073621978355407
+6,tracking + edge share,0.30840518686138185
+6,stopwatch + tracking + edge share,0.3988943344592808
+7,edge share only,0.34106394816251717
+7,stopwatch + edge share,0.3416626783433412
+7,tracking + edge share,0.2917775132631232
+7,stopwatch + tracking + edge share,0.24583160950394445
+8,edge share only,0.3044461701294967
+8,stopwatch + edge share,0.4108357595750908
+8,tracking + edge share,0.21694428934859356
+8,stopwatch + tracking + edge share,0.32931257278982173
+9,edge share only,0.3330045854059335
+9,stopwatch + edge share,0.3549841864804667
+9,tracking + edge share,0.2669834620820808
+9,stopwatch + tracking + edge share,0.20130649416812185
+10,edge share only,0.2995874338138286
+10,stopwatch + edge share,0.3572421415649959
+10,tracking + edge share,0.22168042085130124
+10,stopwatch + tracking + edge share,0.2737306507858974
+11,edge share only,0.3560013301268289
+11,stopwatch + edge share,0.37524038241544366
+11,tracking + edge share,0.3303412252011281
+11,stopwatch + tracking + edge share,0.32823560137543895
+12,edge share only,0.3387586351902032
+12,stopwatch + edge share,0.40546165694594083
+12,tracking + edge share,0.300605898813171
+12,stopwatch + tracking + edge share,0.33119405591232953
+13,edge share only,0.33727366355905264
+13,stopwatch + edge share,0.44630756182906917
+13,tracking + edge share,0.31108512491025675
+13,stopwatch + tracking + edge share,0.3846919600921659
+14,edge share only,0.3200868222951373
+14,stopwatch + edge share,0.33752592607227305
+14,tracking + edge share,0.19359332317319644
+14,stopwatch + tracking + edge share,0.2603317272575113
+15,edge share only,0.3203435722863712
+15,stopwatch + edge share,0.3591272433824465
+15,tracking + edge share,0.25847105052429886
+15,stopwatch + tracking + edge share,0.2827402117517851
+16,edge share only,0.3278139223636102
+16,stopwatch + edge share,0.4201600734630173
+16,tracking + edge share,0.2807630413704293
+16,stopwatch + tracking + edge share,0.33168391133811836
+17,edge share only,0.28359901465886694
+17,stopwatch + edge share,0.30822893435158494
+17,tracking + edge share,0.19928450793221608
+17,stopwatch + tracking + edge share,0.23878304237864545
+18,edge share only,0.3406789415584094
+18,stopwatch + edge share,0.3843959752428414
+18,tracking + edge share,0.214712956630152
+18,stopwatch + tracking + edge share,0.32216391629446994
+19,edge share only,0.3247198348007657
+19,stopwatch + edge share,0.393533035010841
+19,tracking + edge share,0.23263289375982443
+19,stopwatch + tracking + edge share,0.30294208026483005
