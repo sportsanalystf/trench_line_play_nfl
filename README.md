@@ -100,7 +100,7 @@ Raw data is read from `/standard/ds7200-apt4c/DS5110_Fall26_Group3/data` and the
 | Models: benchmark + sophisticated models, as Spark ML Pipelines | 06; player-level models in 07b |
 | K-fold CV of hyperparameters | 06: `CrossValidator(foldCol="fold")` |
 | Evaluation: AUROC, accuracy, precision, recall, F1, confusion matrix, lift; R², RMSE, MAE; comparison | 07 |
-| Sensitivity analysis | 07 |
+| Sensitivity analysis | 07: tree hyperparameters; DL get-off trait effects over 10 re-drawn player splits |
 | Why Spark: distributed processing, performance | 09, 10 |
 
 ## Team and contributions

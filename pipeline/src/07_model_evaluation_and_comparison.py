@@ -7,10 +7,12 @@
 # 2. **Metrics.** Classification: AUROC with a 95% **player-bootstrap** CI, AUPR, and accuracy / precision / recall / F1 at a threshold chosen on validation (max F1), plus top-decile lift. Regression: R², RMSE, MAE at the snap level, and R² of player averages (30+ snaps).
 # 3. **Ceiling ("oracle").** Context plus each player's *actual* average outcome on the scored split. It leaks on purpose and shows the most any player trait could add.
 # 4. **Trait effects (the research question).** For first-step quickness, lateral agility and burst, separately and together, plus the stopwatch equivalent: the change in test metric over the context-only benchmark, with a **paired player-bootstrap 95% CI**. Also the **direction** of each trait's standardized coefficient, oriented so that + means "better trait → better line play".
-# 5. **Champion** per task, chosen on validation: confusion matrix (classification), hyperparameter **sensitivity**, and feature-importance shares by block.
+# 5. **Champion** per task, chosen on validation: confusion matrix (classification), hyperparameter **sensitivity**, **sensitivity to the player split** (DL get-off refitted on several train/validation splits), and feature-importance shares by block.
 # 6. **Player-level ranking**: do the models order the 2025 rookies correctly?
 #
-# **Inputs:** `processed/task_*.parquet`, `outputs/models/*`, `outputs/tables/06_*.csv`.  **Outputs:** `outputs/tables/07_*.csv`, `outputs/figures/07_*.png`.
+# **Inputs:** `processed/task_*.parquet`, `outputs/models/*`, `outputs/tables/06_*.csv`.  **Outputs:** `outputs/tables/07_*.csv`, `outputs/figures/07_*.png`, `processed/eval_*.parquet`.
+#
+# Environment: `N_BOOT` = bootstrap draws (300 on Rivanna); `N_SPLITS` = re-drawn player splits for the split check (10); `N_BOOT_SPLIT` = draws per split (default `N_BOOT`).
 
 # %%
 import sys, json, os
@@ -298,6 +300,118 @@ fig.tight_layout(); fig.savefig(C.FIG_DIR / "07_sensitivity.png", bbox_inches="t
 sens = (cv_res_s.groupBy("task", "model").agg(F.round(F.min("cv_mean"), 4).alias("min"), F.round(F.max("cv_mean"), 4).alias("max"))
                 .orderBy("task", "model").toPandas())
 sens.to_csv(C.TABLE_DIR / "07_sensitivity_ranges.csv", index=False); sens
+
+# %% [markdown]
+# ### Sensitivity to the player split (DL get-off)
+# Only ~50 DL are in training, so which 2023–24 players land in training rather than validation can move a small effect. This check re-draws the split `N_SPLITS` times with the rule from notebook 05 (stratified by draft year and position group, seeded hash order, 20% validation), each time with a different seed. **Split 0 uses the project seed**, so it reproduces the split used everywhere else. On each training set it refits the linear get-off models with the regularization chosen in notebook 06 and scores them on the same 2025 test class. Every split is bootstrapped on the **same** Poisson player draws as section 2, so only the training players change from one split to the next.
+
+# %%
+from pyspark.ml.feature import Imputer
+N_SPLITS = int(os.environ.get("N_SPLITS", "10"))
+B_SPLIT = int(os.environ.get("N_BOOT_SPLIT", str(B)))
+SPLIT_TASK = "dl_getoff"
+SPEC = {"benchmark": [], "first_step": ["trk_first_step"], "lateral": ["trk_lateral"], "burst": ["trk_burst"],
+        "traits": FS["trk"], "stopwatch": FS["sw"]}
+
+def lin_pipeline(feats, reg):
+    """The notebook 06 linear pipeline: context one-hot + numeric + player features, imputed, scaled, linear regression."""
+    cats, nums = FS["context_cat"], FS["context_num"]
+    st = [StringIndexer(inputCol=c, outputCol=f"{c}_idx", handleInvalid="keep") for c in cats]
+    st.append(OneHotEncoder(inputCols=[f"{c}_idx" for c in cats], outputCols=[f"{c}_ohe" for c in cats], handleInvalid="keep"))
+    imp = [c for c in feats if not c.startswith("miss_")]
+    if imp:
+        st.append(Imputer(inputCols=imp, outputCols=imp, strategy="median"))
+    st += [VectorAssembler(inputCols=[f"{c}_ohe" for c in cats] + nums + list(feats), outputCol="features_raw", handleInvalid="keep"),
+           StandardScaler(inputCol="features_raw", outputCol="features", withMean=True, withStd=True),
+           LinearRegression(featuresCol="features", labelCol="target", weightCol="weight", maxIter=200, regParam=reg)]
+    return Pipeline(stages=st)
+best_reg = {r.model: json.loads(r.best_params)["regParam"] for r in cv_sum[cv_sum.task == SPLIT_TASK].itertuples() if r.model in SPEC}
+
+# the notebook 05 split rule, once per seed (all DL players of 2023–24, as in notebook 05)
+dl23 = (spark.read.parquet(C.p("line_players.parquet"))
+             .filter((F.col("line_group") == "DL") & (F.col("draft_year") != C.TEST_DRAFT_CLASS))
+             .withColumn("pos_group", F.when(F.col("nfl_position").isin("DE", "OLB"), "edge").otherwise("interior"))
+             .select("nfl_id", "draft_year", "pos_group"))
+seeds = spark.createDataFrame([(i, C.SEED + i) for i in range(N_SPLITS)], "split_no INT, seed INT")
+stratum = ["split_no", "draft_year", "pos_group"]
+assign = (dl23.crossJoin(seeds)
+              .withColumn("_rn", F.row_number().over(Window.partitionBy(*stratum).orderBy(F.xxhash64("nfl_id", F.col("seed")))))
+              .withColumn("_n", F.count(F.lit(1)).over(Window.partitionBy(*stratum)))
+              .withColumn("is_train", F.col("_rn") > F.round(F.lit(C.VALIDATION_FRACTION) * F.col("_n")).cast("int"))
+              .select("split_no", "nfl_id", "is_train").cache())
+gd = data[SPLIT_TASK]
+check = (assign.filter("split_no = 0").join(gd.filter("split != 'test'").select("nfl_id", "split").distinct(), "nfl_id")
+               .filter(F.col("is_train") != (F.col("split") == "train")).count())
+assert check == 0, "split 0 should reproduce the notebook 05 split"
+overlap = (assign.filter("is_train").groupBy("nfl_id").agg(F.count(F.lit(1)).alias("k"))
+                 .agg(F.avg(F.col("k") / N_SPLITS)).first()[0])
+print(f"{N_SPLITS} splits; split 0 = notebook 05 split (checked); a training player is in training in {overlap:.0%} of splits on average")
+
+test_g = gd.filter("split = 'test'").cache()
+sp_parts = []
+for i in range(N_SPLITS):
+    tr = gd.filter("split != 'test'").join(assign.filter((F.col("split_no") == i) & F.col("is_train")).select("nfl_id"), "nfl_id").cache()
+    for m, feats in SPEC.items():
+        fitted = lin_pipeline(feats, best_reg[m]).fit(tr)
+        sp_parts.append(fitted.transform(test_g).select(F.lit(SPLIT_TASK).alias("task"), F.lit(i).alias("split_no"), F.lit(m).alias("model"),
+                                                       "nfl_id", F.col("target").cast("double").alias("target"), F.col("prediction").alias("p")))
+    tr.unpersist()
+SP = sp_parts[0]
+for p_ in sp_parts[1:]:
+    SP = SP.unionByName(p_)
+SP.write.mode("overwrite").parquet(C.p("eval_split_predictions.parquet"))
+SP = spark.read.parquet(C.p("eval_split_predictions.parquet")).cache()
+
+# point deltas and paired bootstrap CIs per split (same Poisson draws as section 2: same hash of task, player, draw)
+Sg = ["split_no", "model"]
+u_sp = F.abs(F.xxhash64("task", "nfl_id", "b", F.lit(C.SEED)) % 1_000_000_007).cast("double") / 1_000_000_007
+pois_w = sum(F.when(u_sp > c, 1).otherwise(0) for c in POIS)
+sp_draws = (spark.range(B_SPLIT).withColumnRenamed("id", "b").crossJoin(SP.select("task", "nfl_id").distinct())
+                 .withColumn("w", pois_w.cast("double")).filter(F.col("w") > 0))
+sp_pt = r2(SP, Sg).withColumnRenamed("r2", "metric")
+sp_bt = r2(SP.join(sp_draws, ["task", "nfl_id"]), Sg + ["b"], w="w").withColumnRenamed("r2", "metric")
+vs_bench = lambda df, keys: (df.filter(F.col("model") != "benchmark")
+                               .join(df.filter(F.col("model") == "benchmark").select(*keys, F.col("metric").alias("bench")), keys)
+                               .withColumn("delta", F.col("metric") - F.col("bench")))
+split_eff_s = (vs_bench(sp_bt, ["split_no", "b"]).groupBy(*Sg).agg(F.percentile("delta", [0.025, 0.975]).alias("ci"))
+                 .join(vs_bench(sp_pt, ["split_no"]).select(*Sg, "delta", F.col("bench").alias("benchmark_r2")), Sg)
+                 .select(*Sg, "benchmark_r2", "delta", F.col("ci")[0].alias("ci_lo"), F.col("ci")[1].alias("ci_hi"))
+                 .withColumn("significant", (F.col("ci_lo") > 0) | (F.col("ci_hi") < 0))
+                 .cache())
+split_sum_s = (split_eff_s.groupBy("model").agg(
+                   F.count(F.lit(1)).alias("splits"), F.percentile("delta", 0.5).alias("median_delta"),
+                   F.min("delta").alias("min_delta"), F.max("delta").alias("max_delta"),
+                   F.avg((F.col("delta") > 0).cast("double")).alias("share_positive"),
+                   F.avg((F.col("significant") & (F.col("delta") > 0)).cast("double")).alias("share_significant_gain")))
+split_eff = split_eff_s.toPandas()
+split_eff["_o"] = split_eff.model.map({m: i for i, m in enumerate(EFFECT_MODELS)})
+split_eff = split_eff.sort_values(["_o", "split_no"]).drop(columns="_o")
+split_eff.round(4).to_csv(C.TABLE_DIR / "07_split_sensitivity.csv", index=False)
+split_sum = split_sum_s.toPandas().set_index("model").reindex(EFFECT_MODELS)
+split_sum.round(4).to_csv(C.TABLE_DIR / "07_split_sensitivity_summary.csv")
+split_sum.round(4)
+
+# %%
+fig, ax = plt.subplots(figsize=(10, 4.4))
+ACCENT, OTHER = "#1f5fd6", "#9aa5b1"
+for j, m in enumerate(EFFECT_MODELS):
+    d_ = split_eff[split_eff.model == m].sort_values("split_no")
+    xs = j + np.linspace(-0.3, 0.3, len(d_))
+    for x, r_ in zip(xs, d_.itertuples()):
+        head = r_.split_no == 0
+        ax.errorbar(x, r_.delta, yerr=[[r_.delta - r_.ci_lo], [r_.ci_hi - r_.delta]], fmt="o", ms=6 if head else 4.5,
+                    color=ACCENT if head else OTHER, mec="white", mew=1, elinewidth=1.6 if head else 1, capsize=0, zorder=3 if head else 2)
+    s_ = split_sum.loc[m]
+    ax.annotate(f"significant gain\nin {s_.share_significant_gain:.0%} of splits", (j, 0.98), xycoords=("data", "axes fraction"),
+                ha="center", va="top", fontsize=8, color="#444")
+lo_, hi_ = ax.get_ylim(); ax.set_ylim(lo_, hi_ + 0.28 * (hi_ - lo_))      # headroom for the labels
+ax.axhline(0, color="#555", lw=1)
+ax.set_xticks(range(len(EFFECT_MODELS)), [LABEL[m] for m in EFFECT_MODELS], fontsize=9)
+ax.set_ylabel("Test R² change over the benchmark")
+ax.plot([], [], "o", color=ACCENT, label="split 0 (the project split)"); ax.plot([], [], "o", color=OTHER, label="other splits")
+ax.legend(frameon=False, fontsize=8, loc="lower left")
+ax.set_title(f"DL get-off: trait effects over {N_SPLITS} train/validation splits (95% paired player-bootstrap CI)", fontsize=10, loc="left")
+fig.tight_layout(); fig.savefig(C.FIG_DIR / "07_split_sensitivity.png", bbox_inches="tight"); plt.show()
 
 # %% [markdown]
 # ## 5. Feature importance by block (GBT models)

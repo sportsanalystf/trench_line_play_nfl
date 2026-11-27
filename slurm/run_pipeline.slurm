@@ -34,6 +34,7 @@ export SPARK_DRIVER_MEMORY="48g"
 export SPARK_SHUFFLE_PARTITIONS="64"
 export CV_PARALLELISM="4"      # 06: models fitted in parallel during CV
 export N_BOOT="300"            # 07: bootstrap resamples
+export N_SPLITS="10"           # 07: re-drawn player splits for the DL get-off split check
 export PLAYER_CV_REPEATS="20"  # 07b: repeats of the player-level 5-fold CV
 export PERF_REPEATS="3"        # 10: timed runs per benchmark
 export PERF_CORES="1,2,4,8,16" # 10: core counts for the scaling test
