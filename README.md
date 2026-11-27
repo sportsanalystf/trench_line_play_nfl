@@ -42,6 +42,8 @@ ds5110-trench-play/
 
 Each notebook starts with **what it does, its inputs and its outputs**, and saves every figure / table it makes to `outputs/` with its step number as the prefix.
 
+**All computation runs in Spark** (DataFrames, window functions, Spark ML). The shared helpers in `config.py` (`describe`, `histogram`, `pearson`, `spearman`, `avg_rank`) compute statistics as Spark aggregations. pandas only receives finished, small results (a few thousand rows at most) to draw a figure or write a CSV, and the frames of the few plays drawn in 08 and 11. The one deliberate exception is the pandas baseline that notebook 10 benchmarks Spark against.
+
 | Step | Notebook | What it does | Main outputs |
 | --- | --- | --- | --- |
 | 01 | `01_data_ingest_and_cleaning` | explicit schemas for all 9 CSVs, OL + DL cohort, CSV → Parquet | `line_*.parquet`, `combine_tracking.parquet` |

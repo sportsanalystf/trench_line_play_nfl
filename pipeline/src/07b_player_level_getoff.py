@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path.cwd().parent))
 import numpy as np, pandas as pd
 import matplotlib.pyplot as plt
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from pyspark.ml import Pipeline
 from pyspark.ml.feature import Imputer, VectorAssembler, StandardScaler
 from pyspark.ml.regression import LinearRegression
@@ -52,35 +53,43 @@ per_player = (rush.groupBy("nfl_id").agg(F.count("*").alias("rush_snaps"), F.avg
                                          F.avg((F.col("lined_up_position") == "EDGE").cast("double")).alias("edge_share"))
                   .join(players.select("nfl_id", "display_name", "draft_year", *STOPWATCH), "nfl_id")
                   .join(traits, "nfl_id", "left"))
-dl = per_player.filter((F.col("rush_snaps") >= 100) & F.col("ten_yd_split").isNotNull()).toPandas().sort_values("nfl_id")
-print(f"{len(dl)} DL with 100+ rush snaps and a 10-yard split (draft classes: {dl.draft_year.value_counts().sort_index().to_dict()})")
-print("missing drills:", dl[STOPWATCH + TRACKING].isna().sum().to_dict())
-dl[["nfl_id", "rush_snaps", "mean_get_off", "edge_share"] + STOPWATCH + TRACKING].describe().round(3).T
+dl = per_player.filter((F.col("rush_snaps") >= 100) & F.col("ten_yd_split").isNotNull()).cache()
+n_dl = dl.count()
+classes = {r.draft_year: r["count"] for r in dl.groupBy("draft_year").count().orderBy("draft_year").collect()}
+print(f"{n_dl} DL with 100+ rush snaps and a 10-yard split (draft classes: {classes})")
+C.describe(dl, ["rush_snaps", "mean_get_off", "edge_share"] + STOPWATCH + TRACKING).drop("min").toPandas().round(3)
 
 # %% [markdown]
 # ## 2. Correlations with average get-off (Jarmarr's table, plus the tracking traits)
-# Get-off is a time, so a **positive** r for a timed drill (10-yard split, 40, 3-cone, shuttle) and a **negative** r for a jump or a tracking index (higher = better) both mean "better tester, faster get-off". The 95% interval uses the Fisher z transform.
+# Get-off is a time, so a **positive** r for a timed drill (10-yard split, 40, 3-cone, shuttle) and a **negative** r for a jump or a tracking index (higher = better) both mean "better tester, faster get-off". The 95% interval uses the Fisher z transform. All computed in Spark (`config.pearson`, `config.spearman`); the least-squares line for each scatter is fitted in Spark too.
 
 # %%
-def corr_row(x, name):
-    d = dl[[name, "mean_get_off"]].dropna()
-    n = len(d); r = d[name].corr(d.mean_get_off); rho = d[name].rank().corr(d.mean_get_off.rank())   # Spearman = Pearson on ranks (no scipy needed)
-    z, se = np.arctanh(r), 1 / np.sqrt(max(n - 3, 1))
-    return dict(feature=name, label=LABELS[name], kind=x, n=n, pearson_r=r, ci_lo=np.tanh(z - 1.96 * se), ci_hi=np.tanh(z + 1.96 * se),
-                spearman_rho=rho)
-corr = pd.DataFrame([corr_row("stopwatch", c) for c in STOPWATCH] + [corr_row("tracking", c) for c in TRACKING]
-                    + [corr_row("context", "edge_share")])
+FEATS = [("stopwatch", c) for c in STOPWATCH] + [("tracking", c) for c in TRACKING] + [("context", "edge_share")]
+parts = []
+for kind, c in FEATS:
+    ok = F.col(c).isNotNull()
+    line = dl.agg((F.covar_samp(F.when(ok, F.col(c)), F.when(ok, F.col("mean_get_off"))) / F.var_samp(F.when(ok, F.col(c)))).alias("slope"),
+                  F.avg(F.when(ok, F.col(c))).alias("xmu"), F.avg(F.when(ok, F.col("mean_get_off"))).alias("ymu"))
+    parts.append(C.pearson(dl, c, "mean_get_off").crossJoin(C.spearman(dl, c, "mean_get_off").select(F.col("spearman").alias("spearman_rho")))
+                  .crossJoin(line).select(F.lit(c).alias("feature"), F.lit(LABELS[c]).alias("label"), F.lit(kind).alias("kind"), "n",
+                                          "pearson_r", "ci_lo", "ci_hi", "spearman_rho", "slope",
+                                          (F.col("ymu") - F.col("slope") * F.col("xmu")).alias("intercept")))
+corr_s = parts[0]
+for p_ in parts[1:]:
+    corr_s = corr_s.unionByName(p_)
+corr = corr_s.toPandas()
 corr.to_csv(C.TABLE_DIR / "07b_correlations.csv", index=False)
 corr.round(3)
 
 # %%
+pts = dl.select("mean_get_off", "edge_share", *STOPWATCH, *TRACKING).toPandas()      # 55 points: plotted, not computed on
 fig, axes = plt.subplots(3, 3, figsize=(13, 11))
 for ax, name in zip(axes.flat, STOPWATCH + TRACKING):
-    d = dl[[name, "mean_get_off", "edge_share"]].dropna()
+    d = pts[[name, "mean_get_off", "edge_share"]].dropna()
     sc = ax.scatter(d[name], d.mean_get_off, c=d.edge_share, cmap="viridis", vmin=0, vmax=1, s=34, edgecolors="white", linewidths=.5)
-    b = np.polyfit(d[name], d.mean_get_off, 1); xs = np.linspace(d[name].min(), d[name].max(), 20)
-    ax.plot(xs, np.polyval(b, xs), color=GREY, lw=1.2, ls="--")
     rr = corr.set_index("feature").loc[name]
+    xs = np.array([d[name].min(), d[name].max()])
+    ax.plot(xs, rr.intercept + rr.slope * xs, color=GREY, lw=1.2, ls="--")
     ax.set_title(f"{LABELS[name]}\nr = {rr.pearson_r:+.2f} [{rr.ci_lo:+.2f}, {rr.ci_hi:+.2f}], n = {int(rr.n)}", fontsize=9.5)
     ax.set_ylabel("average get-off (s)" if ax in axes[:, 0] else "")
 fig.subplots_adjust(hspace=.55, wspace=.25)
@@ -89,8 +98,13 @@ fig.suptitle("Combine drills vs a DL's average NFL get-off (one dot = one player
 fig.savefig(C.FIG_DIR / "07b_drills_vs_mean_getoff.png", bbox_inches="tight"); plt.show()
 
 # %%
-# how much the drills overlap with each other (Jarmarr's inter-correlation table)
-inter = dl[STOPWATCH + TRACKING].corr().round(2)
+# how much the drills overlap with each other (Jarmarr's inter-correlation table), pairwise in Spark
+cols9 = STOPWATCH + TRACKING
+row = dl.agg(*[F.corr(a, b).alias(f"{a}__{b}") for i, a in enumerate(cols9) for b in cols9[i + 1:]]).first().asDict()
+inter = pd.DataFrame(np.eye(len(cols9)), index=cols9, columns=cols9)
+for key_, v in row.items():
+    a, b = key_.split("__"); inter.loc[a, b] = inter.loc[b, a] = v
+inter = inter.round(2)
 inter.to_csv(C.TABLE_DIR / "07b_drill_intercorrelations.csv")
 fig, ax = plt.subplots(figsize=(7.5, 6.2))
 im = ax.imshow(inter.values, cmap="RdBu_r", vmin=-1, vmax=1)
@@ -111,8 +125,7 @@ fig.tight_layout(); fig.savefig(C.FIG_DIR / "07b_drill_intercorrelations.png", b
 # %%
 MISSING = ["three_cone", "short_shuttle", "vertical", "broad_jump"]
 JW_FEATURES = ["ten_yd_split", "forty"] + [f"{c}_imputed" for c in MISSING] + ["edge_share"]
-dl_spark = spark.createDataFrame(dl[["nfl_id", "draft_year", "mean_get_off", "edge_share"] + STOPWATCH + TRACKING].astype(
-    {c: float for c in STOPWATCH + TRACKING + ["edge_share", "mean_get_off"]}))
+dl_spark = dl.select("nfl_id", "draft_year", *[F.col(c).cast("double") for c in ["mean_get_off", "edge_share"] + STOPWATCH + TRACKING])
 train, test = dl_spark.randomSplit([0.8, 0.2], seed=42)
 print("training players:", train.count(), "| test players:", test.count())
 
@@ -132,8 +145,8 @@ print("intercept", round(lr_stage.intercept, 4)); display(coefs.round(4))
 jw_results.round(4)
 
 # %% [markdown]
-# ## 4. How stable is that R²? Repeated cross-validation
-# With 12 test players, one split can move R² a lot. Here every player is predicted exactly once per repeat (5 folds), and the split is redrawn `PLAYER_CV_REPEATS` times. Four feature sets are compared, all as Spark ML Pipelines (imputer → assembler → scaler → linear regression; a small ridge penalty keeps the fits stable):
+# ## 4. How stable is that R²? Repeated cross-validation (in Spark)
+# With 12 test players, one split can move R² a lot. Here every player is predicted exactly once per repeat (5 folds), and the split is redrawn `PLAYER_CV_REPEATS` times. Folds are assigned in Spark (players ordered by a seeded hash per repeat, then dealt round-robin), every fit is a Spark ML Pipeline (imputer → assembler → scaler → linear regression; a small ridge penalty keeps the fits stable), and the out-of-fold R² is 1 − Σ SSE / SST over all players.
 # * **edge share only** (context baseline);
 # * **stopwatch** (Jarmarr's seven features);
 # * **tracking** traits + edge share;
@@ -144,35 +157,33 @@ SETS = {"edge share only": ["edge_share"],
         "stopwatch + edge share": STOPWATCH + ["edge_share"],
         "tracking + edge share": TRACKING + ["edge_share"],
         "stopwatch + tracking + edge share": STOPWATCH + TRACKING + ["edge_share"]}
+has_missing = {c for c in STOPWATCH + TRACKING + ["edge_share"] if dl.filter(F.col(c).isNull()).limit(1).count()}
 def make_pipe(cols):
-    imp = [c for c in cols if dl[c].isna().any()]
+    imp = [c for c in cols if c in has_missing]
     stages = [Imputer(inputCols=imp, outputCols=[f"{c}_i" for c in imp], strategy="median")] if imp else []
     feats = [f"{c}_i" if c in imp else c for c in cols]
     return Pipeline(stages=stages + [VectorAssembler(inputCols=feats, outputCol="raw"),
                                      StandardScaler(inputCol="raw", outputCol="features", withMean=True, withStd=True),
                                      LinearRegression(featuresCol="features", labelCol="mean_get_off", regParam=0.01)])
-def oof_r2(df_pd, pipe, folds):
-    """Out-of-fold predictions for every player, then one R² over all of them."""
-    sdf = spark.createDataFrame(df_pd.assign(fold=folds)).cache()
-    preds = []
-    for k in sorted(set(folds)):
-        m = pipe.fit(sdf.filter(F.col("fold") != k))
-        preds.append(m.transform(sdf.filter(F.col("fold") == k)).select("nfl_id", "mean_get_off", "prediction").toPandas())
-    sdf.unpersist()
-    p = pd.concat(preds)
-    return 1 - ((p.mean_get_off - p.prediction) ** 2).sum() / ((p.mean_get_off - p.mean_get_off.mean()) ** 2).sum()
-
-base_cols = ["nfl_id", "draft_year", "mean_get_off"] + STOPWATCH + TRACKING + ["edge_share"]
-dd = dl[base_cols].astype({c: float for c in base_cols if c not in ("nfl_id", "draft_year")})
-rng = np.random.default_rng(C.SEED)
+ybar = dl_spark.agg(F.avg("mean_get_off")).first()[0]
+sst = dl_spark.agg(F.sum((F.col("mean_get_off") - F.lit(ybar)) ** 2)).first()[0]          # total sum of squares, every player
+folds = (spark.range(CV_REPEATS).withColumnRenamed("id", "rep").crossJoin(dl_spark)
+              .withColumn("fold", (F.row_number().over(Window.partitionBy("rep").orderBy(F.xxhash64("nfl_id", "rep", F.lit(C.SEED)))) - 1) % 5)
+              .cache())
 cv_rows = []
 for rep in range(CV_REPEATS):
-    folds = rng.permutation(np.arange(len(dd)) % 5)
+    fr = folds.filter(F.col("rep") == rep)
     for name, cols in SETS.items():
-        cv_rows.append(dict(repeat=rep, feature_set=name, r2=oof_r2(dd, make_pipe(cols), folds)))
-cv = pd.DataFrame(cv_rows)
-cv_summary = (cv.groupby("feature_set").r2.agg(mean="mean", p2_5=lambda s: s.quantile(.025), p97_5=lambda s: s.quantile(.975))
-                .reindex(SETS.keys()).reset_index())
+        sse = 0.0
+        for k in range(5):
+            m = make_pipe(cols).fit(fr.filter(F.col("fold") != k))
+            sse += m.transform(fr.filter(F.col("fold") == k)).agg(F.sum((F.col("mean_get_off") - F.col("prediction")) ** 2)).first()[0]
+        cv_rows.append((rep, name, 1 - sse / sst))
+cv_s = spark.createDataFrame(cv_rows, "repeat int, feature_set string, r2 double")
+cv_summary_s = cv_s.groupBy("feature_set").agg(F.avg("r2").alias("mean"), F.percentile("r2", [0.025, 0.975]).alias("q"))
+cv_summary = (cv_summary_s.select("feature_set", "mean", F.col("q")[0].alias("p2_5"), F.col("q")[1].alias("p97_5")).toPandas()
+              .set_index("feature_set").reindex(SETS.keys()).reset_index())
+cv = cv_s.toPandas()
 cv.to_csv(C.TABLE_DIR / "07b_repeated_cv.csv", index=False); cv_summary.to_csv(C.TABLE_DIR / "07b_repeated_cv_summary.csv", index=False)
 cv_summary.round(3)
 
@@ -181,15 +192,14 @@ cv_summary.round(3)
 # The same rule as the snap-level models (notebook 05): players from the newest class are never seen in training.
 
 # %%
-tr_pd, te_pd = dd[dd.draft_year < C.TEST_DRAFT_CLASS], dd[dd.draft_year == C.TEST_DRAFT_CLASS]
+tr_s = dl_spark.filter(F.col("draft_year") < C.TEST_DRAFT_CLASS)
+te_s = dl_spark.filter(F.col("draft_year") == C.TEST_DRAFT_CLASS)
+n_tr, n_te = tr_s.count(), te_s.count()
 oot = []
-if len(te_pd) >= 5:
-    tr_s, te_s = spark.createDataFrame(tr_pd), spark.createDataFrame(te_pd)
+if n_te >= 5:
     for name, cols in SETS.items():
-        p = make_pipe(cols).fit(tr_s).transform(te_s).select("mean_get_off", "prediction").toPandas()
-        r2 = 1 - ((p.mean_get_off - p.prediction) ** 2).sum() / ((p.mean_get_off - p.mean_get_off.mean()) ** 2).sum()
-        oot.append(dict(feature_set=name, train_players=len(tr_pd), test_players=len(te_pd), test_r2=r2,
-                        test_mae=float(np.abs(p.mean_get_off - p.prediction).mean())))
+        p = make_pipe(cols).fit(tr_s).transform(te_s)
+        oot.append(dict(feature_set=name, train_players=n_tr, test_players=n_te, test_r2=ev("r2", p), test_mae=ev("mae", p)))
 oot = pd.DataFrame(oot)
 oot.to_csv(C.TABLE_DIR / "07b_out_of_time_2025.csv", index=False)
 oot.round(3) if len(oot) else print("fewer than 5 players from the 2025 class: out-of-time test skipped")
@@ -198,10 +208,10 @@ oot.round(3) if len(oot) else print("fewer than 5 players from the 2025 class: o
 fig, ax = plt.subplots(figsize=(8.5, 3.6))
 order = list(SETS.keys())
 for i, name in enumerate(order):
-    v = cv[cv.feature_set == name].r2
-    ax.plot([v.quantile(.025), v.quantile(.975)], [i, i], color=BLUE, lw=6, alpha=.35, solid_capstyle="round")
-    ax.plot(v.mean(), i, "o", color=BLUE, ms=8)
-    ax.text(v.quantile(.975) + .01, i, f"{v.mean():.2f}", va="center", fontsize=9)
+    r_ = cv_summary.set_index("feature_set").loc[name]
+    ax.plot([r_.p2_5, r_.p97_5], [i, i], color=BLUE, lw=6, alpha=.35, solid_capstyle="round")
+    ax.plot(r_["mean"], i, "o", color=BLUE, ms=8)
+    ax.text(r_.p97_5 + .01, i, f"{r_['mean']:.2f}", va="center", fontsize=9)
     if len(oot):
         ax.plot(oot.set_index("feature_set").loc[name, "test_r2"], i, "D", color=ORANGE, ms=7,
                 label="2025 class (out of time)" if i == 0 else None)
@@ -217,16 +227,18 @@ fig.tight_layout(); fig.savefig(C.FIG_DIR / "07b_player_level_r2.png", bbox_inch
 # Notebook 07 found that adding a trait to the snap-level model raised get-off R² by only about 0.006. The two results agree once you split the variance of get-off into a **between-player** part (who the player is) and a **within-player** part (snap-to-snap). A player-level R² only applies to the between-player part, so its snap-level equivalent is roughly
 #
 # **snap-level gain ≈ player-level R² × between-player share of variance.**
+#
+# The variance split is a one-way ANOVA (method-of-moments) estimate, from Spark aggregates over every DL rush snap.
 
 # %%
-agg = (rush.groupBy("nfl_id").agg(F.count("*").alias("n"), F.avg("player_get_off").alias("m"),
-                                  F.sum(F.col("player_get_off") ** 2).alias("ss")).toPandas())
-N, k = agg.n.sum(), len(agg)
-grand = (agg.n * agg.m).sum() / N
-ssb = (agg.n * (agg.m - grand) ** 2).sum()
-ssw = (agg.ss - agg.n * agg.m ** 2).sum()
-msb, msw = ssb / (k - 1), ssw / (N - k)
-n0 = (N - (agg.n ** 2).sum() / N) / (k - 1)
+grand = rush.agg(F.avg("player_get_off")).first()[0]
+agg = rush.groupBy("nfl_id").agg(F.count(F.lit(1)).alias("n"), F.avg("player_get_off").alias("m"),
+                                 F.sum(F.col("player_get_off") ** 2).alias("ss"))
+a = agg.agg(F.sum("n").alias("N"), F.count(F.lit(1)).alias("k"), F.sum(F.col("n") ** 2).alias("n2"),
+            F.sum(F.col("n") * (F.col("m") - F.lit(grand)) ** 2).alias("ssb"),
+            F.sum(F.col("ss") - F.col("n") * F.col("m") ** 2).alias("ssw")).first()
+msb, msw = a.ssb / (a.k - 1), a.ssw / (a.N - a.k)
+n0 = (a.N - a.n2 / a.N) / (a.k - 1)
 var_b = max((msb - msw) / n0, 0)
 between_share = var_b / (var_b + msw)
 best = cv_summary.set_index("feature_set")
@@ -236,10 +248,8 @@ for name in ["stopwatch + edge share", "tracking + edge share", "stopwatch + tra
                     value=max(best.loc[name, "mean"] - best.loc["edge share only", "mean"], 0) * between_share))
 te = C.TABLE_DIR / "07_trait_effects.csv"
 if te.exists():
-    t = pd.read_csv(te).query("task == 'dl_getoff'").set_index("model")
-    for m in ["burst", "stopwatch", "traits"]:
-        if m in t.index:
-            rec.append(dict(quantity=f"measured snap-level gain in notebook 07 ({m})", value=t.loc[m, "delta"]))
+    t = spark.read.csv(str(te), header=True, inferSchema=True).filter((F.col("task") == "dl_getoff") & F.col("model").isin("burst", "stopwatch", "traits"))
+    rec += [dict(quantity=f"measured snap-level gain in notebook 07 ({r.model})", value=r.delta) for r in t.collect()]
 recon = pd.DataFrame(rec)
 recon.to_csv(C.TABLE_DIR / "07b_reconciliation.csv", index=False)
 recon.round(4)

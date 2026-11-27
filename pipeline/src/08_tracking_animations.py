@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.patches import Circle, FancyBboxPatch, FancyArrowPatch
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 import config as C
 
 spark = C.get_spark("08_animations")
@@ -132,25 +133,36 @@ DEMOS = [  # (group, trait, drill, metric used to pick, +1 higher is better / -1
     ("OL", "lateral", "FIVE_YARD_WAVE_DRILL_SLIDE_AND_SHUFFLE", "rev_time", -1),
     ("OL", "burst", "OL_PULL_DRILL_FOLD_BLOCK_RIGHT", "acc_peak", 1),
 ]
-att = spark.read.parquet(C.p("trait_attempts.parquet")).toPandas()
-pl = spark.read.parquet(C.p("line_players.parquet")).select("nfl_id", "nfl_position", "line_group").toPandas()
-ti = spark.read.parquet(C.p("trait_indices.parquet")).toPandas()
+att = spark.read.parquet(C.p("trait_attempts.parquet"))
+pl = spark.read.parquet(C.p("line_players.parquet")).select("nfl_id", "nfl_position")
+ti = spark.read.parquet(C.p("trait_indices.parquet")).cache()
 
-def pick(group, drill, metric, sign):
-    a = att[(att.line_group == group) & (att.drill_name == drill) & att[metric].notna()]
+def pick(group, trait, drill, metric, sign):
+    """All in Spark: each player's best attempt (window), the group's percentiles, the attempts nearest to them,
+    and each player's drill percentile (share of the group he beats on this metric)."""
+    a = att.filter((F.col("line_group") == group) & (F.col("drill_name") == drill) & F.col(metric).isNotNull())
     if metric == "rev_time":
-        a = a[a.n_reversals >= 1]
-    best = (a.sort_values(metric, ascending=(sign < 0)).groupby("nfl_id").head(1))
+        a = a.filter(F.col("n_reversals") >= 1)
+    better_first = F.col(metric).asc() if sign < 0 else F.col(metric).desc()
+    worse_first = F.col(metric).desc() if sign < 0 else F.col(metric).asc()
+    best = (a.withColumn("_r", F.row_number().over(Window.partitionBy("nfl_id").orderBy(better_first)))
+             .filter("_r = 1").drop("_r")
+             .withColumn("pct", F.bround(100 * (F.rank().over(Window.orderBy(worse_first)) - 1)
+                                         / F.count(F.lit(1)).over(Window.partitionBy())).cast("int"))
+             .join(pl, "nfl_id", "left")
+             .join(ti.select("nfl_id", F.col(f"trk_{trait}").alias("idx")), "nfl_id", "left")
+             .cache())
     hi_q, lo_q = (0.9, 0.1) if sign > 0 else (0.1, 0.9)
-    top = best.iloc[(best[metric] - best[metric].quantile(hi_q)).abs().argsort().iloc[0]]
-    bot = best.iloc[(best[metric] - best[metric].quantile(lo_q)).abs().argsort().iloc[0]]
-    return top, bot, best[metric]
+    q_hi, q_lo, med = best.agg(F.percentile(metric, [hi_q, lo_q, 0.5])).first()[0]
+    nearest = lambda v: (best.orderBy(F.abs(F.col(metric) - F.lit(v)), F.col(metric), "nfl_id")
+                             .limit(1).toPandas().iloc[0])          # one row → a Series for the drawing code
+    return nearest(q_hi), nearest(q_lo), med
 
 choices = {}
 for group, trait, drill, metric, sign in DEMOS:
-    top, bot, dist = pick(group, drill, metric, sign)
-    choices[(group, trait)] = dict(drill=drill, metric=metric, sign=sign, top=top, bot=bot, dist=dist)
-    print(f"{group} {trait:<10} {drill:<45} A: {top[metric]:.2f}  B: {bot[metric]:.2f}  (group median {dist.median():.2f})")
+    top, bot, med = pick(group, trait, drill, metric, sign)
+    choices[(group, trait)] = dict(drill=drill, metric=metric, sign=sign, top=top, bot=bot)
+    print(f"{group} {trait:<10} {drill:<45} A: {top[metric]:.2f}  B: {bot[metric]:.2f}  (group median {med:.2f})")
 ev_ids = [c[k].event_id for c in choices.values() for k in ("top", "bot")]
 frames = (spark.read.parquet(C.p("combine_tracking.parquet")).filter(F.col("event_id").isin(ev_ids))
           .select("event_id", "ts", "x", "y", "s").toPandas())
@@ -166,9 +178,6 @@ TRAIT_HOW = {
     "lateral": "at each direction reversal: time slowed below 70% of entry speed, braking in, re-acceleration out",
     "burst": "peak signed acceleration in the first 1.5 s; speed at 1.0 s; ground covered in the first 1.0 s",
 }
-def pct_rank(dist, v, sign):
-    return int(round(100 * ((dist < v).mean() if sign > 0 else (dist > v).mean())))
-
 TMAX = {"first_step": 1.6, "lateral": None, "burst": 2.5}   # seconds after first movement worth showing
 
 def combine_animation(group, trait):
@@ -181,10 +190,9 @@ def combine_animation(group, trait):
         if TMAX[trait] is not None:
             d = d[d.t_rel <= TMAX[trait]]
         d = d[(d.t_rel >= -0.3)].reset_index(drop=True)
-        pos = pl.set_index("nfl_id").nfl_position.get(row.nfl_id, "?")
-        idx = ti.set_index("nfl_id")[f"trk_{trait}"].get(row.nfl_id, np.nan)
-        runs.append(dict(d=d, m=m, col=col, lab=f"Player {lab} ({pos})", idx=idx,
-                         pct=pct_rank(c["dist"], row[c["metric"]], c["sign"])))
+        pos = row.nfl_position if isinstance(row.nfl_position, str) else "?"
+        idx = row.idx if pd.notna(row.idx) else np.nan
+        runs.append(dict(d=d, m=m, col=col, lab=f"Player {lab} ({pos})", idx=idx, pct=int(row.pct)))
     n = max(len(r["d"]) for r in runs)
     tmax = max(r["d"].t_rel.max() for r in runs)
 
@@ -340,16 +348,22 @@ rush = (plays.filter((F.col("line_group") == "DL") & F.col("player_get_off").isN
         .withColumn("pressure", ((F.col("time_to_pressure").isNotNull()) | F.col("time_to_qb_hurry").isNotNull() |
                                  (F.coalesce(F.col("sack"), F.lit(0)) > 0)).cast("int"))
         .select("game_id", "play_id", "nfl_id", "down", "yards_to_go", "play_direction", "lined_up_position", "player_get_off",
-                "pressure", "time_to_pressure", "g_s05", "g_s10", "g_t_1yd").toPandas())
-n_snaps = rush.groupby("nfl_id").size()
-dl_ti = ti[(ti.line_group == "DL") & ti.nfl_id.isin(n_snaps[n_snaps >= 100].index)].dropna(subset=["trk_burst"])
-hi_id = dl_ti.sort_values("trk_burst").iloc[-3].nfl_id      # near the top (avoid the single extreme)
-lo_id = dl_ti.sort_values("trk_burst").iloc[2].nfl_id
+                "pressure", "time_to_pressure", "g_s05", "g_s10", "g_t_1yd").cache())
+n_ok = rush.groupBy("nfl_id").count().filter(F.col("count") >= 100).select("nfl_id")
+dl_ti = (ti.filter((F.col("line_group") == "DL") & F.col("trk_burst").isNotNull()).join(n_ok, "nfl_id").join(pl, "nfl_id", "left")
+           .select("nfl_id", "nfl_position", "trk_burst",
+                   F.row_number().over(Window.orderBy(F.col("trk_burst").desc(), "nfl_id")).alias("from_top"),
+                   F.row_number().over(Window.orderBy(F.col("trk_burst").asc(), "nfl_id")).alias("from_bottom")))
+pick_dl = {r.nfl_id: r for r in dl_ti.filter((F.col("from_top") == 3) | (F.col("from_bottom") == 3)).collect()}
+hi_id = next(k for k, r in pick_dl.items() if r.from_top == 3)      # near the top (avoid the single extreme)
+lo_id = next(k for k, r in pick_dl.items() if r.from_bottom == 3)
 def typical_snap(pid):
-    r = rush[(rush.nfl_id == pid) & (rush.down == 3) & rush.g_s10.notna()]
-    r = r if len(r) else rush[(rush.nfl_id == pid) & rush.g_s10.notna()]
-    med = r.g_s10.median()
-    return r.iloc[(r.g_s10 - med).abs().argsort().iloc[0]]
+    """Spark: the player's third-down rush snap (any down if none) whose speed at 1.0 s is nearest his own median."""
+    r = rush.filter((F.col("nfl_id") == pid) & F.col("g_s10").isNotNull())
+    r3 = r.filter(F.col("down") == 3)
+    r = r3 if r3.limit(1).count() else r
+    med = r.agg(F.percentile("g_s10", 0.5)).first()[0]
+    return r.orderBy(F.abs(F.col("g_s10") - F.lit(med)), "game_id", "play_id").limit(1).toPandas().iloc[0]
 snaps = [typical_snap(hi_id), typical_snap(lo_id)]
 keys = [(int(s.game_id), int(s.play_id), int(s.nfl_id)) for s in snaps]
 gt = spark.read.parquet(C.p("line_game_tracking.parquet"))
@@ -371,8 +385,8 @@ def snap_align(d, play_direction):
 runs = []
 for s, col, lab in [(snaps[0], COL_A, "A"), (snaps[1], COL_B, "B")]:
     d = snap_align(gfr[(gfr.game_id == s.game_id) & (gfr.play_id == s.play_id) & (gfr.nfl_id == s.nfl_id)], s.play_direction)
-    pos = pl.set_index("nfl_id").nfl_position.get(s.nfl_id, "?")
-    idx = ti.set_index("nfl_id").trk_burst.get(s.nfl_id)
+    pos = pick_dl[s.nfl_id].nfl_position or "?"
+    idx = pick_dl[s.nfl_id].trk_burst
     runs.append(dict(d=d, s=s, col=col, lab=f"Player {lab} ({pos}, {s.lined_up_position.lower().replace('_line', '')})", idx=idx))
 
 fig = plt.figure(figsize=(14, 6.4))
@@ -432,14 +446,17 @@ save(anim, "game_dl_pass_rush", fig)
 # %%
 olr = (ing.filter((F.col("line_group") == "OL") & (F.col("play_type") == "run") & F.col("slot").isNotNull())
           .join(plays.select("game_id", "play_id", "nfl_id", "play_description", "play_direction", "yards_gained",
-                             "expected_points_added", "down", "yards_to_go"), ["game_id", "play_id", "nfl_id"]).toPandas())
-grp = olr.groupby(["game_id", "play_id"])
-cands = grp.filter(lambda g: (len(g) >= 2) and (g.slot.nunique() == len(g)) and (g.credit.max() == 1.0) and (g.credit.min() == 0))
-if cands.empty:
-    cands = grp.filter(lambda g: (len(g) >= 2) and (g.credit.max() >= 0.5))
-best = cands.groupby(["game_id", "play_id"]).yards_gained.first().sort_values(ascending=False)
-gid, pid = best.index[len(best) // 4]                                   # a decent, not extreme, run
-play = olr[(olr.game_id == gid) & (olr.play_id == pid)].copy()
+                             "expected_points_added", "down", "yards_to_go"), ["game_id", "play_id", "nfl_id"]).cache())
+per_run = olr.groupBy("game_id", "play_id").agg(F.count(F.lit(1)).alias("n"), F.countDistinct("slot").alias("n_slots"),
+                                                F.max("credit").alias("cmax"), F.min("credit").alias("cmin"),
+                                                F.first("yards_gained", ignorenulls=True).alias("yards"))
+cands = per_run.filter((F.col("n") >= 2) & (F.col("n_slots") == F.col("n")) & (F.col("cmax") == 1.0) & (F.col("cmin") == 0))
+if cands.limit(1).count() == 0:
+    cands = per_run.filter((F.col("n") >= 2) & (F.col("cmax") >= 0.5))
+ranked = cands.withColumn("rk", F.row_number().over(Window.orderBy(F.col("yards").desc(), "game_id", "play_id")))
+quarter = ranked.count() // 4 + 1                                       # a decent, not extreme, run
+gid, pid = ranked.filter(F.col("rk") == quarter).select("game_id", "play_id").first()
+play = olr.filter((F.col("game_id") == gid) & (F.col("play_id") == pid)).toPandas()   # the 2–3 linemen to draw
 pf = (gt.filter((F.col("game_id") == int(gid)) & (F.col("play_id") == int(pid)) & F.col("nfl_id").isin([int(v) for v in play.nfl_id]))
         .select("nfl_id", "ts", "x", "y", "s", "event").toPandas())
 pf["ts"] = pd.to_datetime(pf.ts)

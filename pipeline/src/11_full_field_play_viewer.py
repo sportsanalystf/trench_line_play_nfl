@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 from matplotlib import animation, patches
 from IPython.display import display, Image
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from pyspark.sql.types import StructType, StructField, IntegerType, LongType, DoubleType, StringType
 import config as C
 
@@ -71,14 +72,14 @@ PASS_RE = r"pass (?:incomplete )?(short|deep) (left|middle|right)"
 NAME = r"([A-Z][a-z]{0,3}\.\s?[A-Z][A-Za-z'\-]+(?:\s(?:Jr|Sr|II|III)\.?)?)"
 
 # %% [markdown]
-# ## 1. Choose the plays (Spark + pandas)
+# ## 1. Choose the plays (Spark)
 
 # %%
 I_, L_, D_, S_ = IntegerType(), LongType(), DoubleType(), StringType()
 GT_SCHEMA = StructType([StructField(n, t, True) for n, t in [("game_id", L_), ("play_id", I_), ("nfl_id", I_), ("time", S_),
     ("x", D_), ("y", D_), ("s", D_), ("a", D_), ("dis", D_), ("o", D_), ("dir", D_), ("event", S_)]])
 raw_gt = spark.read.option("header", True).option("nullValue", "NA").schema(GT_SCHEMA).csv(C.game_tracking_files())
-per_play = raw_gt.groupBy("game_id", "play_id").agg(F.countDistinct("nfl_id").alias("n_rookies")).toPandas()
+per_play = raw_gt.groupBy("game_id", "play_id").agg(F.countDistinct("nfl_id").alias("n_rookies"))
 
 pp = spark.read.parquet(C.p("line_player_play.parquet")).filter(
     (F.col("season_type") == "REG") & (F.coalesce(F.col("play_nullified_by_penalty"), F.lit("N")) != "Y") & F.col("down").between(1, 4))
@@ -86,44 +87,52 @@ ing = spark.read.parquet(C.p("ingame_snaps.parquet")).select("game_id", "play_id
 L = (pp.join(ing, ["game_id", "play_id", "nfl_id"], "left")
        .select("game_id", "play_id", "nfl_id", "line_group", "slot", "credit", "run_success", "pass_result", "yards_gained",
                "play_description", "time_to_pressure", "time_to_qb_hurry", "sack", "tackle", "pressure_allowed",
-               "player_get_off", "offense_formation").toPandas())
-L["pressure"] = L.time_to_pressure.notna() | L.time_to_qb_hurry.notna() | (L.sack.fillna(0) > 0)
-g = L.groupby(["game_id", "play_id"])
-plays = pd.DataFrame({
-    "n_ol": g.line_group.apply(lambda s: (s == "OL").sum()), "n_dl": g.line_group.apply(lambda s: (s == "DL").sum()),
-    "pass_result": g.pass_result.first(), "yards": g.yards_gained.first(), "desc": g.play_description.first(),
-    "formation": g.offense_formation.first()}).reset_index().merge(per_play, on=["game_id", "play_id"])
-plays["n_line"] = plays.n_ol + plays.n_dl
-plays["has_pass_dir"] = plays.desc.str.contains(PASS_RE, regex=True, na=False)
-plays["has_gap"] = plays.desc.str.contains(GAP_RE, regex=True, na=False)
-plays = plays[plays.formation.notna() & ~plays.desc.str.contains("PENALTY|FUMBLE|Direct snap|Aborted", case=False, na=True)]
-plays = plays.sort_values(["game_id", "play_id"])
+               "player_get_off", "offense_formation")
+       .withColumn("pressure", F.col("time_to_pressure").isNotNull() | F.col("time_to_qb_hurry").isNotNull()
+                               | (F.coalesce(F.col("sack"), F.lit(0)) > 0))
+       .cache())
+is_ol, is_dl = F.col("line_group") == "OL", F.col("line_group") == "DL"
+plays = (L.groupBy("game_id", "play_id").agg(          # one row per play, all in Spark
+            F.sum(is_ol.cast("int")).alias("n_ol"), F.sum(is_dl.cast("int")).alias("n_dl"),
+            F.first("pass_result", ignorenulls=True).alias("pass_result"),
+            F.first("yards_gained", ignorenulls=True).alias("yards"),
+            F.first("play_description", ignorenulls=True).alias("desc"),
+            F.first("offense_formation", ignorenulls=True).alias("formation"),
+            # every rookie OL on the play kept the QB clean (used for the clean pass-block play)
+            F.min(F.when(is_ol, F.when(F.col("pressure_allowed") == False, 1).otherwise(0))).alias("ol_all_clean"))
+         .join(per_play, ["game_id", "play_id"])
+         .withColumn("n_line", F.col("n_ol") + F.col("n_dl"))
+         .withColumn("has_pass_dir", F.coalesce(F.col("desc").rlike(PASS_RE), F.lit(False)))
+         .withColumn("has_gap", F.coalesce(F.col("desc").rlike(GAP_RE), F.lit(False)))
+         .filter(F.col("formation").isNotNull() & F.col("desc").isNotNull()
+                 & ~F.col("desc").rlike("(?i)PENALTY|FUMBLE|Direct snap|Aborted"))
+         .cache())
 
 def focus_candidates(cond):
-    return L[cond].groupby(["game_id", "play_id"]).nfl_id.first()
+    """One focus lineman per play: the lowest nfl_id among the rookies meeting `cond` (deterministic)."""
+    return L.filter(cond).groupBy("game_id", "play_id").agg(F.min("nfl_id").alias("focus_id"))
 
+no_sack = F.coalesce(F.col("sack"), F.lit(0)) == 0
 rules = {
-    "pressure_incomplete": (plays.pass_result.eq("I") & plays.has_pass_dir,
-                            focus_candidates((L.line_group == "DL") & L.pressure & (L.sack.fillna(0) == 0))),
-    "sack": (plays.pass_result.eq("S") & plays.desc.str.contains("sacked at", na=False),
-             focus_candidates((L.line_group == "DL") & (L.sack.fillna(0) > 0))),
-    "pass_block_clean": (plays.pass_result.eq("C") & plays.has_pass_dir & (plays.n_ol >= 2),
-                         focus_candidates((L.line_group == "OL") & (L.pressure_allowed == False))),
-    "run_block_credit": (plays.pass_result.isna() & plays.has_gap & (plays.yards >= 4),
-                         focus_candidates((L.line_group == "OL") & (L.credit == 1) & (L.run_success == 1))),
-    "run_stuff": (plays.pass_result.isna() & plays.has_gap & (plays.yards <= 1),
-                  focus_candidates((L.line_group == "DL") & (L.tackle.fillna(0) > 0))),
+    "pressure_incomplete": ((F.col("pass_result") == "I") & F.col("has_pass_dir"),
+                            focus_candidates(is_dl & F.col("pressure") & no_sack)),
+    "sack": ((F.col("pass_result") == "S") & F.col("desc").contains("sacked at"),
+             focus_candidates(is_dl & ~no_sack)),
+    "pass_block_clean": ((F.col("pass_result") == "C") & F.col("has_pass_dir") & (F.col("n_ol") >= 2) & (F.col("ol_all_clean") == 1),
+                         focus_candidates(is_ol & (F.col("pressure_allowed") == False))),
+    "run_block_credit": (F.col("pass_result").isNull() & F.col("has_gap") & (F.col("yards") >= 4),
+                         focus_candidates(is_ol & (F.col("credit") == 1) & (F.col("run_success") == 1))),
+    "run_stuff": (F.col("pass_result").isNull() & F.col("has_gap") & (F.col("yards") <= 1),
+                  focus_candidates(is_dl & (F.coalesce(F.col("tackle"), F.lit(0)) > 0))),
 }
-clean_ok = L[L.line_group == "OL"].groupby(["game_id", "play_id"]).pressure_allowed.apply(lambda s: (s == False).all())
-chosen, used = [], set()
+chosen, used = [], []
 for name, (cond, focus) in rules.items():
-    c = plays[cond].merge(focus.rename("focus_id").reset_index(), on=["game_id", "play_id"])
-    if name == "pass_block_clean":
-        c = c[c.set_index(["game_id", "play_id"]).index.map(lambda k: bool(clean_ok.get(k, False)))]
-    c = c[~c.set_index(["game_id", "play_id"]).index.isin(used)]
-    if c.empty: print("no play for", name); continue
-    r = c.sort_values(["n_line", "n_rookies"], ascending=False, kind="stable").iloc[0]
-    used.add((r.game_id, r.play_id))
+    c = plays.filter(cond).join(focus, ["game_id", "play_id"])
+    for g_, p_ in used:                                   # a play is shown once
+        c = c.filter(~((F.col("game_id") == g_) & (F.col("play_id") == p_)))
+    r = c.orderBy(F.col("n_line").desc(), F.col("n_rookies").desc(), "game_id", "play_id").first()   # most linemen tracked
+    if r is None: print("no play for", name); continue
+    used.append((r.game_id, r.play_id))
     chosen.append(dict(name=name, game_id=int(r.game_id), play_id=int(r.play_id), focus_id=int(r.focus_id),
                        n_rookies=int(r.n_rookies), n_ol=int(r.n_ol), n_dl=int(r.n_dl), desc=r.desc))
 chosen = pd.DataFrame(chosen)
@@ -150,10 +159,15 @@ games = pd.read_csv(C.raw("games.csv"))
 line = spark.read.parquet(C.p("line_players.parquet")).select("nfl_id", "line_group").toPandas()
 ingp = (spark.read.parquet(C.p("ingame_snaps.parquet")).join(F.broadcast(keys), ["game_id", "play_id"])
         .select("game_id", "play_id", "nfl_id", "slot", "credit", "run_gap", "run_success").toPandas())
-traits = spark.read.parquet(C.p("trait_indices.parquet")).toPandas()
-for t in C.TRAITS:
-    traits[f"pct_{t}"] = traits.groupby("line_group")[f"trk_{t}"].rank(pct=True) * 100
-traits = traits[["nfl_id"] + [f"pct_{t}" for t in C.TRAITS]]
+ti = spark.read.parquet(C.p("trait_indices.parquet"))
+pct_cols = []
+for t in C.TRAITS:   # percentile within OL or DL = average rank / players with the trait (pandas rank(pct=True))
+    c = f"trk_{t}"
+    ranked = (ti.filter(F.col(c).isNotNull())
+                .select("nfl_id", (100 * C.avg_rank(c, by=["line_group"])
+                                   / F.count(F.lit(1)).over(Window.partitionBy("line_group"))).alias(f"pct_{t}")))
+    ti = ti.join(ranked, "nfl_id", "left")
+traits = ti.select("nfl_id", *[f"pct_{t}" for t in C.TRAITS]).toPandas()
 print(f"{len(frames):,} frames, {frames.nfl_id.nunique()} tracked rookies over {len(chosen)} plays")
 
 # %% [markdown]

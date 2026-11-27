@@ -134,38 +134,38 @@ for grp, traits in C.TRAIT_DRILLS.items():
         for d in drills:
             for m, s in C.TRAIT_METRICS[trait].items():
                 rows.append((grp, trait, d, m, s))
-comp = pd.DataFrame(rows, columns=["line_group", "trait", "drill_name", "metric", "sign"])
-comp["component"] = comp.trait + "|" + comp.drill_name + "|" + comp.metric
-bp = best.toPandas()
-long = bp.melt(id_vars=["nfl_id", "line_group", "draft_year", "drill_name"], value_vars=list(metric_sign),
-               var_name="metric", value_name="value").dropna()
-long = long.merge(comp, on=["line_group", "drill_name", "metric"])
-print("trait components with data:", long.component.nunique())
+comp = (spark.createDataFrame(rows, "line_group string, trait string, drill_name string, metric string, sign int")
+             .withColumn("component", F.concat_ws("|", "trait", "drill_name", "metric")))
+best = spark.read.parquet(C.p("trait_drill_best.parquet"))
+metrics = list(metric_sign)
+unpivot = "stack({}, {}) as (metric, value)".format(len(metrics), ", ".join(f"'{m}', cast({m} as double)" for m in metrics))
+long = (best.select("nfl_id", "line_group", "draft_year", "drill_name", F.expr(unpivot))       # wide → long, in Spark
+            .filter(F.col("value").isNotNull())
+            .join(F.broadcast(comp), ["line_group", "drill_name", "metric"]))
+print("trait components with data:", long.select("component").distinct().count())
 
 # %% [markdown]
 # ## 4. Trait indices (z-scores fitted on 2023–24 players)
 # A component needs values for at least 60% of its group's players to count. Each player's trait index is the mean of his available oriented z-scores, so a prospect who skipped a drill is still scored from the others.
 
 # %%
-fit = long[long.draft_year != C.TEST_DRAFT_CLASS]
-stats = fit.groupby(["line_group", "component"]).value.agg(["mean", "std", "count"]).reset_index()
-n_players = bp[bp.draft_year != C.TEST_DRAFT_CLASS].groupby("line_group").nfl_id.nunique().rename("n_group")
-stats = stats.merge(n_players, on="line_group")
-stats["coverage"] = stats["count"] / stats.n_group
-keep = stats[stats.coverage >= 0.6]
-print(f"components kept: {len(keep)} of {len(stats)}")
-z = long.merge(keep[["line_group", "component", "mean", "std"]], on=["line_group", "component"])
-z["z"] = z.sign * (z.value - z["mean"]) / z["std"]
-z["z"] = z.z.clip(-3, 3)                                   # winsorize extreme z-scores
-idx = z.pivot_table(index=["nfl_id", "line_group"], columns="trait", values="z", aggfunc="mean")
-idx.columns = [f"trk_{c}" for c in idx.columns]
-ncomp = z.groupby(["nfl_id", "line_group", "trait"]).z.size().unstack()
-ncomp.columns = [f"n_{c}" for c in ncomp.columns]
-idx = idx.join(ncomp).reset_index()
-# component-level wide table too (used for the drill-level correlation table)
-comp_wide = z.pivot_table(index=["nfl_id", "line_group"], columns="component", values="z").reset_index()
-keep.to_csv(C.TABLE_DIR / "03_trait_components.csv", index=False)
-keep.groupby(["line_group", "component"]).coverage.first().unstack(0).round(2).head(40)
+is_fit = F.col("draft_year") != C.TEST_DRAFT_CLASS
+n_group = best.filter(is_fit).groupBy("line_group").agg(F.countDistinct("nfl_id").alias("n_group"))
+stats = (long.filter(is_fit).groupBy("line_group", "component")
+             .agg(F.avg("value").alias("mean"), F.stddev_samp("value").alias("std"), F.count("value").alias("count"))
+             .join(n_group, "line_group").withColumn("coverage", F.col("count") / F.col("n_group")))
+keep = stats.filter(F.col("coverage") >= 0.6).cache()
+print(f"components kept: {keep.count()} of {stats.count()}")
+clip3 = lambda c: F.when(c.isNotNull(), F.greatest(F.lit(-3.0), F.least(F.lit(3.0), c)))   # winsorize; keep missing as missing
+z = (long.join(F.broadcast(keep.select("line_group", "component", "mean", "std")), ["line_group", "component"])
+         .withColumn("z", clip3(F.col("sign") * (F.col("value") - F.col("mean")) / F.col("std"))))
+idx = z.groupBy("nfl_id", "line_group").pivot("trait", C.TRAITS).agg(F.avg("z").alias("trk"), F.count("z").alias("n"))
+for t in C.TRAITS:
+    idx = (idx.withColumnRenamed(f"{t}_trk", f"trk_{t}")
+              .withColumn(f"n_{t}", F.when(F.col(f"{t}_n") > 0, F.col(f"{t}_n").cast("double"))).drop(f"{t}_n"))
+keep_pd = keep.orderBy("line_group", "component").toPandas()
+keep_pd.to_csv(C.TABLE_DIR / "03_trait_components.csv", index=False)
+keep_pd.pivot(index="component", columns="line_group", values="coverage").round(2).head(40)
 
 # %% [markdown]
 # ## 5. Stopwatch indices and size-adjusted trait indices
@@ -173,29 +173,37 @@ keep.groupby(["line_group", "component"]).coverage.first().unstack(0).round(2).h
 # * **Size-adjusted** (`adj_*`): the residual of each tracking trait index after a linear fit on body weight within the position group (fitted on 2023–24 players). It separates "moves well for his size" from "is light".
 
 # %%
-pl = players.select("nfl_id", "line_group", "draft_year", "nfl_position", "combine_weight", "combine_height",
-                    "arm_length", "ten_yd_split", "short_shuttle", "three_cone", "broad_jump", "vertical", "forty").toPandas()
+sw_cols = sorted({c for parts in C.TRAD_TRAITS.values() for c in parts})
+pl = players.select("nfl_id", "line_group", "draft_year", "nfl_position", "combine_weight", "combine_height", "arm_length", *sw_cols)
+ref = pl.filter(is_fit).groupBy("line_group").agg(*[F.avg(c).alias(f"{c}__mu") for c in sw_cols],
+                                                  *[F.stddev_samp(c).alias(f"{c}__sd") for c in sw_cols])
+pl = pl.join(F.broadcast(ref), "line_group")
 for trait, parts in C.TRAD_TRAITS.items():
-    zs = []
-    for col, s in parts.items():
-        ref = pl[pl.draft_year != C.TEST_DRAFT_CLASS].groupby("line_group")[col].agg(["mean", "std"])
-        mu = pl.line_group.map(ref["mean"]); sd = pl.line_group.map(ref["std"])
-        zs.append((s * (pl[col] - mu) / sd).clip(-3, 3))
-    pl[f"sw_{trait}"] = pd.concat(zs, axis=1).mean(axis=1, skipna=True)
-out = pl.merge(idx, on=["nfl_id", "line_group"], how="left")
-for trait in C.TRAITS:
-    out[f"adj_{trait}"] = np.nan
-    for g in C.GROUPS:
-        m = (out.line_group == g) & out[f"trk_{trait}"].notna() & out.combine_weight.notna()
-        f = m & (out.draft_year != C.TEST_DRAFT_CLASS)
-        b1, b0 = np.polyfit(out.loc[f, "combine_weight"], out.loc[f, f"trk_{trait}"], 1)
-        out.loc[m, f"adj_{trait}"] = out.loc[m, f"trk_{trait}"] - (b0 + b1 * out.loc[m, "combine_weight"])
+    zs = [clip3(F.lit(float(sgn)) * (F.col(c) - F.col(f"{c}__mu")) / F.col(f"{c}__sd")) for c, sgn in parts.items()]
+    n_ok = sum(F.when(zz.isNotNull(), 1).otherwise(0) for zz in zs)
+    tot = sum(F.coalesce(zz, F.lit(0.0)) for zz in zs)
+    pl = pl.withColumn(f"sw_{trait}", F.when(n_ok > 0, tot / n_ok))             # mean of the available drills
+out = pl.join(idx, ["nfl_id", "line_group"], "left")
+# size adjustment: least-squares line trk ~ weight per group on 2023-24 players, residual for everyone
+fit_aggs = []
+for t in C.TRAITS:
+    ok = is_fit & F.col(f"trk_{t}").isNotNull() & F.col("combine_weight").isNotNull()
+    wv, tv = F.when(ok, F.col("combine_weight")), F.when(ok, F.col(f"trk_{t}"))
+    fit_aggs += [F.covar_samp(wv, tv).alias(f"{t}__cov"), F.var_samp(wv).alias(f"{t}__var"),
+                 F.avg(wv).alias(f"{t}__wmu"), F.avg(tv).alias(f"{t}__tmu")]
+out = out.join(F.broadcast(out.groupBy("line_group").agg(*fit_aggs)), "line_group")
+for t in C.TRAITS:
+    b1 = F.col(f"{t}__cov") / F.col(f"{t}__var"); b0 = F.col(f"{t}__tmu") - b1 * F.col(f"{t}__wmu")
+    out = out.withColumn(f"adj_{t}", F.col(f"trk_{t}") - (b0 + b1 * F.col("combine_weight")))
 keep_cols = (["nfl_id", "line_group"] + [f"{p}_{t}" for p in ("trk", "sw", "adj") for t in C.TRAITS] +
              [f"n_{t}" for t in C.TRAITS])
-spark.createDataFrame(out[keep_cols].astype({c: float for c in keep_cols if c not in ("nfl_id", "line_group")})) \
-     .write.mode("overwrite").parquet(C.p("trait_indices.parquet"))
-cov = out.groupby("line_group")[[f"trk_{t}" for t in C.TRAITS] + [f"sw_{t}" for t in C.TRAITS]].apply(lambda d: d.notna().mean()).round(2)
-cov.to_csv(C.TABLE_DIR / "03_index_coverage.csv")
+out.select("nfl_id", "line_group", *[F.col(c).cast("double") for c in keep_cols[2:]]) \
+   .write.mode("overwrite").parquet(C.p("trait_indices.parquet"))
+ti = spark.read.parquet(C.p("trait_indices.parquet"))
+cov = (ti.groupBy("line_group").agg(*[F.round(F.avg(F.col(c).isNotNull().cast("double")), 2).alias(c)
+                                      for c in [f"trk_{t}" for t in C.TRAITS] + [f"sw_{t}" for t in C.TRAITS]])
+         .orderBy("line_group").toPandas())
+cov.to_csv(C.TABLE_DIR / "03_index_coverage.csv", index=False)
 print("share of players with each index:"); cov
 
 # %% [markdown]
@@ -203,17 +211,20 @@ print("share of players with each index:"); cov
 # Spearman correlations within each position group. High tracking-vs-stopwatch correlation means tracking re-measures the stopwatch; low means it adds a different view.
 
 # %%
-rows = []
-for g in C.GROUPS:
-    d = out[out.line_group == g]
-    for t in C.TRAITS:
-        for other, lab in [(f"sw_{t}", "same-trait stopwatch index"), ("combine_weight", "body weight")] + \
-                          [(f"trk_{o}", f"tracking {o}") for o in C.TRAITS if o != t]:
-            dd = d[[f"trk_{t}", other]].dropna()
-            rows.append({"group": g, "trait": t, "vs": lab, "n": len(dd),
-                         "spearman": round(dd.iloc[:, 0].rank().corr(dd.iloc[:, 1].rank()), 2)})
-rel = pd.DataFrame(rows)
+tw = ti.join(players.select("nfl_id", "combine_weight", "nfl_position"), "nfl_id")
+parts = []
+for t in C.TRAITS:
+    for other, lab in [(f"sw_{t}", "same-trait stopwatch index"), ("combine_weight", "body weight")] + \
+                      [(f"trk_{o}", f"tracking {o}") for o in C.TRAITS if o != t]:
+        parts.append(C.spearman(tw, f"trk_{t}", other, by=["line_group"])
+                      .select(F.col("line_group").alias("group"), F.lit(t).alias("trait"), F.lit(lab).alias("vs"), "n",
+                              F.round("spearman", 2).alias("spearman")))
+rel_sdf = parts[0]
+for p_ in parts[1:]:
+    rel_sdf = rel_sdf.unionByName(p_)
+rel = rel_sdf.orderBy("group", "trait", "vs").toPandas()
 rel.to_csv(C.TABLE_DIR / "03_trait_relationships.csv", index=False)
+out = tw.toPandas()          # 239 players: input for the two figures below only
 rel.pivot_table(index=["group", "trait"], columns="vs", values="spearman")
 
 # %%
@@ -244,7 +255,7 @@ for r, g in enumerate(C.GROUPS):
     for c, t in enumerate(C.TRAITS):
         ax = axes[r, c]; dd = d[[f"sw_{t}", f"trk_{t}"]].dropna()
         ax.scatter(dd[f"sw_{t}"], dd[f"trk_{t}"], s=16, alpha=.7, color="#2a6fdb" if g == "OL" else "#e07b39")
-        rho = dd.iloc[:, 0].rank().corr(dd.iloc[:, 1].rank())
+        rho = rel[(rel.group == g) & (rel.trait == t) & (rel.vs == "same-trait stopwatch index")].spearman.iloc[0]
         ax.set_title(f"{g} · {t.replace('_', ' ')}: ρ = {rho:.2f} (n = {len(dd)})", fontsize=9)
         ax.set_xlabel("Stopwatch index"); ax.set_ylabel("Tracking index")
 fig.suptitle("Tracking re-measures some stopwatch information, not all of it", fontweight="bold")

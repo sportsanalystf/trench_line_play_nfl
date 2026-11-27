@@ -104,12 +104,11 @@ pop
 # %%
 meas = ["combine_height", "combine_weight", "arm_length", "forty", "ten_yd_split", "vertical", "broad_jump",
         "three_cone", "short_shuttle", "bench_reps", "age_at_draft"]
-desc = []
-for g in C.GROUPS:
-    d = players.filter(F.col("line_group") == g).select(meas).toPandas()
-    s = d.describe().T[["count", "mean", "std", "min", "50%", "max"]]; s["missing_%"] = (100 * d.isna().mean()).round(1)
-    s.insert(0, "group", g); desc.append(s)
-desc = pd.concat(desc).round(2); desc.to_csv(C.TABLE_DIR / "02_combine_descriptives.csv")
+desc = (C.describe(players, meas, by=["line_group"]).withColumnRenamed("line_group", "group")   # computed in Spark
+          .toPandas().round(2))
+desc["column"] = pd.Categorical(desc.column, meas); desc = desc.sort_values(["group", "column"]).reset_index(drop=True)
+desc.to_csv(C.TABLE_DIR / "02_combine_descriptives.csv", index=False)
+miss = desc.set_index(["group", "column"]).missing_pct          # % of prospects without the measurement
 desc
 
 # %% [markdown]
@@ -138,7 +137,7 @@ outc
 dq = []
 for g in C.GROUPS:
     for c in ["three_cone", "short_shuttle", "ten_yd_split", "forty", "broad_jump", "vertical"]:
-        dq.append(("missing value", f"{g} · {c}", f"{desc[(desc.group == g)].loc[c, 'missing_%']}% of prospects", "trait index from other components; stopwatch index + missing flag"))
+        dq.append(("missing value", f"{g} · {c}", f"{miss[(g, c)]}% of prospects", "trait index from other components; stopwatch index + missing flag"))
 names = ct.filter(F.col("drill_name").contains("MIRROR")).select("drill_name").distinct().count()
 dq.append(("inconsistent label", "combine_tracking.drill_name", "PASS_PRO-MIRROR_DRILL (2024–25) vs PASS_PRO_MIRROR_DRILL (2023)", f"standardized in nb 01 ({names} name left)"))
 dis = ct.filter(F.col("step_xy") > 0.05).select(F.expr("percentile_approx(dis / (step_xy * step_xy), 0.5)").alias("r"),
@@ -167,7 +166,7 @@ rows = []
 for g in C.GROUPS:
     n = players.filter(F.col("line_group") == g).count()
     for c in ["three_cone", "short_shuttle", "ten_yd_split", "broad_jump"]:
-        rows.append((g, f"stopwatch: {c}", 1 - desc[desc.group == g].loc[c, "missing_%"] / 100))
+        rows.append((g, f"stopwatch: {c}", 1 - miss[(g, c)] / 100))
     for d_ in sorted({d for ds in C.TRAIT_DRILLS[g].values() for d in ds} - {"SHORT_SHUTTLE", "THREE_CONE_DRILL", "FORTY_YARD_DASH"}):
         rows.append((g, f"tracked: {d_.lower().replace('_drill', '').replace('_', ' ')[:28]}",
                      ct.filter((F.col("line_group") == g) & (F.col("drill_name") == d_)).select("nfl_id").distinct().count() / n))
@@ -297,15 +296,17 @@ lineman_drills
 rp = pp_raw.join(g.filter(F.col("season_type").isin("REG", "POST")), "game_id")
 per_player = (cpos.join(rp, "nfl_id", "left").groupBy("nfl_id", "combine_position")
                   .agg(F.count("play_id").alias("snaps"), F.count("pressure_allowed").alias("ol_pass_block_snaps"),
-                       F.count("player_get_off").alias("dl_rush_snaps")).toPandas())
-snaps_by_pos = per_player.groupby("combine_position")[["snaps", "ol_pass_block_snaps", "dl_rush_snaps"]].describe().round(0).T
-snaps_by_pos.to_csv(C.TABLE_DIR / "02_snaps_by_position.csv")
-rows = []
-for grp, col in [("OL", "ol_pass_block_snaps"), ("DL", "dl_rush_snaps")]:
-    v = per_player[per_player.combine_position == grp][col]
-    rows.append({"group": grp, "snap type": col.replace("_", " "), "players": len(v), "0 snaps": int((v == 0).sum()),
-                 "50+": int((v >= 50).sum()), "100+": int((v >= 100).sum()), "200+": int((v >= 200).sum())})
-thresholds = pd.DataFrame(rows)
+                       F.count("player_get_off").alias("dl_rush_snaps")))
+snaps_by_pos = (C.describe(per_player, ["snaps", "ol_pass_block_snaps", "dl_rush_snaps"], by=["combine_position"])
+                  .orderBy("column", "combine_position").toPandas().round(0))
+snaps_by_pos.to_csv(C.TABLE_DIR / "02_snaps_by_position.csv", index=False)
+v = F.when(F.col("combine_position") == "OL", F.col("ol_pass_block_snaps")).otherwise(F.col("dl_rush_snaps"))
+thresholds = (per_player.filter(F.col("combine_position").isin("OL", "DL"))
+                 .groupBy(F.col("combine_position").alias("group"))
+                 .agg(F.count(F.lit(1)).alias("players"), F.sum((v == 0).cast("int")).alias("0 snaps"),
+                      *[F.sum((v >= k).cast("int")).alias(f"{k}+") for k in (50, 100, 200)])
+                 .withColumn("snap type", F.when(F.col("group") == "OL", "pass-block snaps").otherwise("rush snaps"))
+                 .orderBy(F.desc("group")).toPandas())
 thresholds.to_csv(C.TABLE_DIR / "02_snap_thresholds.csv", index=False)
 thresholds
 
@@ -317,13 +318,15 @@ thresholds
 dl_ids = cpos.filter(F.col("combine_position") == "DL").select("nfl_id")
 dl_go = (rp.join(dl_ids, "nfl_id").filter(F.col("player_get_off").isNotNull() & F.col("lined_up_position").isin("EDGE", "INTERIOR_LINE"))
            .select("nfl_id", "player_get_off", "lined_up_position"))
-go = dl_go.toPandas()
-print(go.groupby("lined_up_position").player_get_off.describe().round(3))
-fig, ax = plt.subplots(figsize=(8, 3.6))
+go_desc = C.describe(dl_go, ["player_get_off"], by=["lined_up_position"]).toPandas().set_index("lined_up_position")
+print(go_desc.round(3))
 bins = np.linspace(0, 2, 41)
+hist = C.histogram(dl_go, "player_get_off", bins, by=["lined_up_position"]).toPandas()    # bin counts from Spark
+fig, ax = plt.subplots(figsize=(8, 3.6))
 for pos, col, lab in [("EDGE", ORANGE, "edge"), ("INTERIOR_LINE", BLUE, "interior")]:
-    v = go[go.lined_up_position == pos].player_get_off
-    ax.hist(v, bins=bins, density=True, alpha=.6, color=col, label=f"{lab} (median {v.median():.2f} s, n = {len(v):,})")
+    h = hist[hist.lined_up_position == pos]; n = go_desc.loc[pos, "count"]
+    ax.bar(h.left, h["count"] / (n * (bins[1] - bins[0])), width=bins[1] - bins[0], align="edge", alpha=.6, color=col,
+           label=f"{lab} (median {go_desc.loc[pos, 'median']:.2f} s, n = {int(n):,})")
 ax.set_xlabel("Get-off: time to cross the line after the snap (s)"); ax.set_ylabel("Share of snaps (density)"); ax.legend(frameon=False)
 ax.set_title("Edge rushers get off faster than interior linemen", fontweight="bold", fontsize=10)
 fig.tight_layout(); fig.savefig(C.FIG_DIR / "02_dl_getoff_by_alignment.png", bbox_inches="tight"); plt.show()
@@ -334,8 +337,9 @@ stop = spark.read.csv(C.raw("combine_results.csv"), header=True, nullValue="NA",
                              "hand_size DOUBLE, arm_length DOUBLE, wing_span DOUBLE, ten_yd_split DOUBLE").select("nfl_id", "ten_yd_split")
 first_look = (dl_go.groupBy("nfl_id").agg(F.count("*").alias("rush_snaps"), F.avg("player_get_off").alias("mean_get_off"),
                                          F.avg((F.col("lined_up_position") == "EDGE").cast("double")).alias("edge_share"))
-                   .filter(F.col("rush_snaps") >= 100).join(stop, "nfl_id").dropna(subset=["ten_yd_split"]).toPandas())
-r = first_look[["ten_yd_split", "mean_get_off"]].corr().iloc[0, 1]
+                   .filter(F.col("rush_snaps") >= 100).join(stop, "nfl_id").dropna(subset=["ten_yd_split"]))
+r = C.pearson(first_look, "ten_yd_split", "mean_get_off").first()["pearson_r"]          # Spark
+first_look = first_look.toPandas()                                                      # 55 points, for the scatter only
 fig, ax = plt.subplots(figsize=(6, 4.2))
 sc = ax.scatter(first_look.ten_yd_split, first_look.mean_get_off, c=first_look.edge_share, cmap="viridis", vmin=0, vmax=1, s=36,
                 edgecolors="white", linewidths=.6)

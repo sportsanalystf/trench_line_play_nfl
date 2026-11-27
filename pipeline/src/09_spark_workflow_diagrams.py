@@ -75,8 +75,10 @@ def parquet_info(name):
                 spark_partitions=spark.read.parquet(str(path)).rdd.getNumPartitions())
 
 pq = {n: parquet_info(n) for n in ["line_game_tracking.parquet", "combine_tracking.parquet", "line_player_play.parquet"]}
-tasks = read_csv("05_task_summary.csv")
-task_rows = tasks.groupby("task").rows.sum().to_dict() if tasks is not None else {}
+task_csv = C.TABLE_DIR / "05_task_summary.csv"
+task_rows = ({r.task: r.rows for r in spark.read.option("header", True).option("inferSchema", True).csv(str(task_csv))
+                                       .groupBy("task").agg(F.sum("rows").alias("rows")).collect()}
+             if task_csv.exists() else {})
 cv = read_csv("06_cv_results.csv")
 n_fits = len(cv) if cv is not None else None
 

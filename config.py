@@ -118,3 +118,64 @@ def get_spark(app_name: str = "ds5110_trench"):
     )
     spark.sparkContext.setLogLevel("ERROR")
     return spark
+
+
+# ---------------------------------------------------------------------------
+# Statistics helpers, computed in Spark (the project does every computation in
+# Spark; pandas only receives finished, small results to plot or save as CSV).
+# ---------------------------------------------------------------------------
+def avg_rank(col: str, by=()):
+    """Rank of `col` within each `by` group, ties sharing their average rank (as pandas .rank() does)."""
+    from pyspark.sql import functions as F
+    from pyspark.sql.window import Window
+    by = list(by)
+    w = Window.partitionBy(*by).orderBy(col) if by else Window.orderBy(col)
+    ties = Window.partitionBy(*by, col)
+    return F.rank().over(w) + (F.count(F.lit(1)).over(ties) - 1) / 2.0
+
+
+def spearman(df, x: str, y: str, by=()):
+    """Spearman rank correlation of x and y per `by` group = Pearson correlation of average ranks.
+    Returns a Spark DataFrame: by..., n, spearman."""
+    from pyspark.sql import functions as F
+    by = list(by)
+    d = (df.select(*by, F.col(x).cast("double").alias("_x"), F.col(y).cast("double").alias("_y"))
+           .dropna(subset=["_x", "_y"]))
+    d = d.withColumn("_rx", avg_rank("_x", by)).withColumn("_ry", avg_rank("_y", by))
+    return d.groupBy(*by).agg(F.count(F.lit(1)).alias("n"), F.corr("_rx", "_ry").alias("spearman"))
+
+
+def pearson(df, x: str, y: str, by=()):
+    """Pearson r of x and y per `by` group with a 95% Fisher-z interval. Returns a Spark DataFrame."""
+    from pyspark.sql import functions as F
+    by = list(by)
+    d = df.select(*by, F.col(x).cast("double").alias("_x"), F.col(y).cast("double").alias("_y")).dropna(subset=["_x", "_y"])
+    r = d.groupBy(*by).agg(F.count(F.lit(1)).alias("n"), F.corr("_x", "_y").alias("pearson_r"))
+    se = 1 / F.sqrt(F.greatest(F.col("n") - 3, F.lit(1)))
+    return (r.withColumn("ci_lo", F.tanh(F.atanh("pearson_r") - 1.96 * se))
+             .withColumn("ci_hi", F.tanh(F.atanh("pearson_r") + 1.96 * se)))
+
+
+def describe(df, cols, by=()):
+    """count, mean, std, min, median, max and % missing for each column (per `by` group), in Spark.
+    Returns a long Spark DataFrame: by..., column, count, mean, std, min, median, max, missing_pct."""
+    from pyspark.sql import functions as F
+    by, out = list(by), None
+    for c in cols:
+        v = F.when(~F.isnan(F.col(c).cast("double")), F.col(c).cast("double"))     # NaN counts as missing, like null
+        part = (df.groupBy(*by).agg(F.count(v).alias("count"), F.avg(v).alias("mean"), F.stddev_samp(v).alias("std"),
+                                    F.min(v).alias("min"), F.percentile(v, 0.5).alias("median"),
+                                    F.max(v).alias("max"), (100 * (1 - F.count(v) / F.count(F.lit(1)))).alias("missing_pct"))
+                  .withColumn("column", F.lit(c)))
+        out = part if out is None else out.unionByName(part)
+    return out.select(*by, "column", "count", "mean", "std", "min", "median", "max", "missing_pct")
+
+
+def histogram(df, col: str, edges, by=()):
+    """Counts of `col` in the bins [edges[i], edges[i+1]) per `by` group, in Spark (for bar-chart histograms)."""
+    from pyspark.sql import functions as F
+    lo, width, k = float(edges[0]), float(edges[1] - edges[0]), len(edges) - 1
+    b = F.floor((F.col(col) - lo) / width).cast("int")
+    return (df.filter(F.col(col).isNotNull() & (F.col(col) >= lo) & (F.col(col) <= float(edges[-1])))
+              .withColumn("bin", F.least(b, F.lit(k - 1))).groupBy(*by, "bin").count()
+              .withColumn("left", F.lit(lo) + F.col("bin") * width))

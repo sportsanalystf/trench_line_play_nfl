@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path.cwd().parent))
 
 import numpy as np, pandas as pd
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 import config as C
 
 spark = C.get_spark("05_prep")
@@ -96,28 +97,33 @@ for n, t in tasks.items():
 
 # %%
 SIZE = ["combine_weight", "combine_height", "arm_length"]
-pl = (players.select("nfl_id", "draft_year", "nfl_position", *SIZE).join(traits.drop("line_group"), "nfl_id", "left"))
+pl = (players.select("nfl_id", "draft_year", "nfl_position", "line_group", *SIZE).join(traits.drop("line_group"), "nfl_id", "left"))
 for t in C.TRAITS:
     pl = pl.withColumn(f"miss_sw_{t}", F.col(f"sw_{t}").isNull().cast("int"))
-plp = pl.join(players.select("nfl_id", "line_group"), "nfl_id").toPandas()
+pl = pl.withColumn("pos_group", F.when(F.col("line_group") == "DL",
+                                       F.when(F.col("nfl_position").isin("DE", "OLB"), "edge").otherwise("interior"))
+                                 .otherwise(F.coalesce(F.col("nfl_position"), F.lit("OL"))))
 
-rng = np.random.default_rng(C.SEED)
-plp["split"] = np.where(plp.draft_year == C.TEST_DRAFT_CLASS, "test", "train")
-plp["fold"] = -1
-plp["pos_group"] = np.where(plp.line_group == "DL", np.where(plp.nfl_position.isin(["DE", "OLB"]), "edge", "interior"),
-                            plp.nfl_position.fillna("OL"))
-for (_, _, _), grp in plp[plp.split == "train"].groupby(["line_group", "draft_year", "pos_group"]):
-    idx = rng.permutation(grp.index.values)
-    n_val = int(round(C.VALIDATION_FRACTION * len(idx)))
-    plp.loc[idx[:n_val], "split"] = "validation"
-    for j, i in enumerate(idx[n_val:]):
-        plp.loc[i, "fold"] = j % C.N_FOLDS
-# winsorize size on training players
+# Player split, all in Spark: within each stratum (group × draft year × position group) players are put in a
+# reproducible random order (a seeded hash of the player id, so it does not depend on partitioning or core count);
+# the first 20% are validation, the rest are dealt round-robin into 5 folds.
+is_test = F.col("draft_year") == C.TEST_DRAFT_CLASS
+strat = Window.partitionBy("line_group", "draft_year", "pos_group").orderBy(F.xxhash64("nfl_id", F.lit(C.SEED)))
+pl = (pl.withColumn("_rn", F.when(~is_test, F.row_number().over(strat)))
+        .withColumn("_n", F.when(~is_test, F.count(F.lit(1)).over(Window.partitionBy("line_group", "draft_year", "pos_group"))))
+        .withColumn("_nval", F.round(F.lit(C.VALIDATION_FRACTION) * F.col("_n")).cast("int"))
+        .withColumn("split", F.when(is_test, "test").when(F.col("_rn") <= F.col("_nval"), "validation").otherwise("train"))
+        .withColumn("fold", F.when(F.col("split") == "train", (F.col("_rn") - F.col("_nval") - 1) % C.N_FOLDS).otherwise(-1))
+        .drop("_rn", "_n", "_nval"))
+# winsorize body size at the 1st / 99th percentile of training players (exact percentiles, in Spark)
+q = pl.filter(F.col("split") == "train").agg(*[F.percentile(c, [0.01, 0.99]).alias(c) for c in SIZE]).first()
 for c in SIZE:
-    lo, hi = plp.loc[plp.split == "train", c].quantile([0.01, 0.99])
-    plp[c] = plp[c].clip(lo, hi)
-plp.groupby(["line_group", "split"]).nfl_id.count().unstack().to_csv(C.TABLE_DIR / "05_players_per_split.csv")
-plp.groupby(["line_group", "split"]).nfl_id.count().unstack()
+    lo, hi = q[c]
+    pl = pl.withColumn(c, F.when(F.col(c).isNotNull(), F.greatest(F.lit(lo), F.least(F.lit(hi), F.col(c)))))
+pl = pl.cache()
+per_split = pl.groupBy("line_group").pivot("split", ["train", "validation", "test"]).count().orderBy("line_group").toPandas()
+per_split.to_csv(C.TABLE_DIR / "05_players_per_split.csv", index=False)
+per_split
 
 # %% [markdown]
 # ## 4. Assemble, weight and save each task table
@@ -130,7 +136,8 @@ RUN_CAT, RUN_NUM = ["run_gap", "slot"], ["credit"]
 TRK = [f"trk_{t}" for t in C.TRAITS]; SW = [f"sw_{t}" for t in C.TRAITS]; ADJ = [f"adj_{t}" for t in C.TRAITS]
 MISS = [f"miss_sw_{t}" for t in C.TRAITS]
 pl_cols = ["nfl_id", "split", "fold", "nfl_position", "pos_group", "draft_year"] + TRK + SW + ADJ + MISS + SIZE
-pls = spark.createDataFrame(plp[pl_cols].astype({c: float for c in TRK + SW + ADJ + SIZE}))
+pls = pl.select("nfl_id", "split", "fold", "nfl_position", "pos_group", "draft_year",
+                *[F.col(c).cast("double") for c in TRK + SW + ADJ], *MISS, *[F.col(c).cast("double") for c in SIZE])
 summary = []
 for name, t in tasks.items():
     extra_cat, extra_num = (RUN_CAT, RUN_NUM) if name == "ol_run" else ([], [])

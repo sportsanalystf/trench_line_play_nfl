@@ -89,8 +89,8 @@ maj = (ol.filter(F.col("lined_up_position").isin("T", "G") & F.col("left_vote").
          .groupBy("nfl_id", "season", "lined_up_position")
          .agg(F.avg("left_vote").alias("vote_mean"), F.count("*").alias("votes")))
 maj.write.mode("overwrite").parquet(C.p("ol_side_majority.parquet"))
-mp = maj.toPandas()
-print(f"player-season-position groups with votes: {len(mp)}; consistent (|mean| ≥ 0.6): {(mp.vote_mean.abs() >= 0.6).mean():.0%}")
+mstat = maj.agg(F.count(F.lit(1)).alias("groups"), F.avg((F.abs("vote_mean") >= 0.6).cast("double")).alias("consistent")).first()
+print(f"player-season-position groups with votes: {mstat.groups}; consistent (|mean| ≥ 0.6): {mstat.consistent:.0%}")
 print("share of T/G snaps with a direct vote:",
       round(ol.filter(F.col("lined_up_position").isin("T", "G")).select(F.avg(F.col("left_vote").isNotNull().cast("int"))).first()[0], 3))
 
@@ -158,19 +158,19 @@ pm = (player_means(rush_keys, "DL pass rush").unionByName(player_means(pblock_ke
       .unionByName(player_means(run_keys, "OL run block")))
 ti = spark.read.parquet(C.p("trait_indices.parquet"))
 pos = players.select("nfl_id", "nfl_position", "combine_weight")
-tp = pm.join(ti, "nfl_id").join(pos, "nfl_id").toPandas()
+tp = pm.join(ti, "nfl_id").join(pos, "nfl_id").cache()
 pairs = {"first_step": [("g_t_1yd", -1), ("g_s05", 1)], "lateral": [("g_lat_max", 1)], "burst": [("g_s10", 1), ("g_d10", 1)]}
-rows = []
-for ctx, d in tp.groupby("context"):
-    for trait, outs in pairs.items():
-        for col, sgn in outs:
-            for src in ("trk", "sw", "adj"):
-                dd = d[[f"{src}_{trait}", col]].dropna()
-                if len(dd) < 15:
-                    continue
-                rows.append({"context": ctx, "trait": trait, "index": src, "in_game": col, "n": len(dd),
-                             "spearman_oriented": round(sgn * dd.iloc[:, 0].rank().corr(dd.iloc[:, 1].rank()), 3)})
-tr = pd.DataFrame(rows)
+parts = []
+for trait, outs in pairs.items():
+    for col, sgn in outs:
+        for src in ("trk", "sw", "adj"):                    # Spearman per context, computed in Spark (config.spearman)
+            parts.append(C.spearman(tp, f"{src}_{trait}", col, by=["context"]).filter(F.col("n") >= 15)
+                          .select("context", F.lit(trait).alias("trait"), F.lit(src).alias("index"), F.lit(col).alias("in_game"),
+                                  "n", F.round(F.lit(float(sgn)) * F.col("spearman"), 3).alias("spearman_oriented")))
+tr_sdf = parts[0]
+for p_ in parts[1:]:
+    tr_sdf = tr_sdf.unionByName(p_)
+tr = tr_sdf.orderBy("context", "trait", "in_game", "index").toPandas()
 tr.to_csv(C.TABLE_DIR / "04_translation.csv", index=False)
 print("oriented so that + means 'better at the Combine → better in games'")
 tr.pivot_table(index=["context", "trait", "in_game"], columns="index", values="spearman_oriented").round(2)
