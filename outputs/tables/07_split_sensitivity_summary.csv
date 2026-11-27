@@ -1,0 +1,6 @@
+model,splits,median_delta,min_delta,max_delta,share_positive,share_significant_gain
+first_step,10,0.0001,-0.0021,0.0005,0.5,0.0
+lateral,10,0.0074,0.0055,0.0126,1.0,1.0
+burst,10,0.0079,0.0052,0.0119,1.0,0.9
+traits,10,0.0184,0.0098,0.0239,1.0,0.7
+stopwatch,10,0.0071,-0.0134,0.0201,0.8,0.0
